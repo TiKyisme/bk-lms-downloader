@@ -122,46 +122,194 @@ def discover_courses_from_browser(
     base_url: str = LMS_BASE,
     timeout: float = _BROWSER_RENDER_TIMEOUT,
 ) -> list[DiscoveredCourse]:
-    """Inspect rendered My Courses in a disposable tab without disturbing Chrome."""
-    original_handle = driver.current_window_handle
-    temporary_handle: str | None = None
+    """Inspect rendered My Courses without closing the student's Chrome window."""
+    original_handle = _current_window_handle(driver)
+    original_handles = _window_handles(driver)
+    original_url = _current_url(driver)
     page_url = urljoin(base_url.rstrip("/") + "/", MY_COURSES_PATH.lstrip("/"))
+    temporary_handle = _open_temporary_tab(driver, original_handle, original_handles)
+    if temporary_handle is None:
+        return _discover_from_original_tab(
+            driver,
+            original_handle,
+            original_url,
+            page_url,
+            timeout,
+        )
+
     try:
-        temporary_handle = _open_temporary_tab(driver, original_handle)
+        if not _switch_to_window(driver, temporary_handle):
+            return []
         driver.get(page_url)
         courses = _wait_for_rendered_courses(driver, page_url, timeout)
         if courses:
             return courses
         return _courses_from_browser_anchors(driver, page_url)
+    except Exception:
+        # A user may close a tab while Selenium is reading it.  Treat only that
+        # case as an empty discovery result; other failures still reach the GUI's
+        # existing friendly error path.
+        current_handles = _window_handles(driver)
+        if temporary_handle not in current_handles or original_handle not in current_handles:
+            return []
+        raise
     finally:
-        if temporary_handle is not None:
-            try:
-                driver.close()
-            finally:
-                # The original tab is never navigated, even if the fallback fails.
-                driver.switch_to.window(original_handle)
+        _cleanup_temporary_tab(driver, original_handle, temporary_handle)
 
 
-def _open_temporary_tab(driver, original_handle: str) -> str:
-    """Open a Selenium tab, with an execute_script fallback for older drivers."""
-    previous_handles = set(driver.window_handles)
+def _open_temporary_tab(
+    driver,
+    original_handle: str | None,
+    original_handles: set[str],
+) -> str | None:
+    """Return a provably new temporary handle, or ``None`` for same-tab use."""
+    if not original_handle or original_handle not in original_handles:
+        return None
+
     try:
         driver.switch_to.new_window("tab")
-    except (AttributeError, NotImplementedError):
-        driver.execute_script("window.open('about:blank', '_blank');")
-        new_handles = [handle for handle in driver.window_handles if handle not in previous_handles]
-        if not new_handles:
-            raise RuntimeError("Chrome did not create a temporary discovery tab.")
-        driver.switch_to.window(new_handles[-1])
+    except Exception:
+        pass
 
-    temporary_handle = driver.current_window_handle
-    if temporary_handle == original_handle:
-        new_handles = [handle for handle in driver.window_handles if handle not in previous_handles]
-        if not new_handles:
-            raise RuntimeError("Chrome did not switch to a temporary discovery tab.")
-        temporary_handle = new_handles[-1]
-        driver.switch_to.window(temporary_handle)
-    return temporary_handle
+    temporary_handle = _verified_new_handle(driver, original_handle, original_handles)
+    if temporary_handle is not None:
+        return temporary_handle
+
+    # Do not guess if new_window changed Chrome in an unexpected way. A new
+    # handle not focused by Selenium could belong to a student action instead.
+    handles_after_native = _window_handles(driver)
+    if handles_after_native - original_handles:
+        return None
+
+    if not _switch_to_window(driver, original_handle):
+        return None
+    try:
+        driver.execute_script("window.open('about:blank', '_blank');")
+    except Exception:
+        return None
+    return _verified_new_handle(driver, original_handle, original_handles, allow_unfocused=True)
+
+
+def _verified_new_handle(
+    driver,
+    original_handle: str,
+    original_handles: set[str],
+    *,
+    allow_unfocused: bool = False,
+) -> str | None:
+    """Verify a single new handle before it can ever be closed later."""
+    current_handles = _window_handles(driver)
+    if original_handle not in current_handles:
+        return None
+    new_handles = current_handles - original_handles
+    if not new_handles:
+        return None
+
+    current_handle = _current_window_handle(driver)
+    if current_handle in new_handles:
+        return current_handle
+    if not allow_unfocused or len(new_handles) != 1:
+        return None
+
+    candidate = next(iter(new_handles))
+    return candidate if _switch_to_window(driver, candidate) else None
+
+
+def _discover_from_original_tab(
+    driver,
+    original_handle: str | None,
+    original_url: str | None,
+    page_url: str,
+    timeout: float,
+) -> list[DiscoveredCourse]:
+    """Safe no-close fallback when Chrome cannot verify a new browser tab."""
+    if not original_handle or original_handle not in _window_handles(driver):
+        return []
+    try:
+        if not _switch_to_window(driver, original_handle):
+            return []
+        driver.get(page_url)
+        courses = _wait_for_rendered_courses(driver, page_url, timeout)
+        if courses:
+            return courses
+        return _courses_from_browser_anchors(driver, page_url)
+    except Exception:
+        if original_handle not in _window_handles(driver):
+            return []
+        raise
+    finally:
+        _restore_original_url(driver, original_handle, original_url)
+
+
+def _cleanup_temporary_tab(
+    driver,
+    original_handle: str | None,
+    temporary_handle: str | None,
+) -> None:
+    """Close only the verified disposable tab, never whichever tab is current."""
+    if not original_handle or not temporary_handle or temporary_handle == original_handle:
+        return
+    handles = _window_handles(driver)
+    if original_handle not in handles or temporary_handle not in handles:
+        if original_handle in handles:
+            _switch_to_window(driver, original_handle)
+        return
+
+    try:
+        if not _switch_to_window(driver, temporary_handle):
+            return
+        handles = _window_handles(driver)
+        if original_handle in handles and temporary_handle in handles:
+            driver.close()
+    except Exception:
+        pass
+    finally:
+        if original_handle in _window_handles(driver):
+            _switch_to_window(driver, original_handle)
+
+
+def _restore_original_url(
+    driver,
+    original_handle: str | None,
+    original_url: str | None,
+) -> None:
+    """Restore same-tab fallback navigation without touching any other window."""
+    if not original_handle or not original_url or original_handle not in _window_handles(driver):
+        return
+    try:
+        if _switch_to_window(driver, original_handle) and _current_url(driver) != original_url:
+            driver.get(original_url)
+    except Exception:
+        pass
+
+
+def _window_handles(driver) -> set[str]:
+    try:
+        return set(driver.window_handles)
+    except Exception:
+        return set()
+
+
+def _current_window_handle(driver) -> str | None:
+    try:
+        return driver.current_window_handle
+    except Exception:
+        return None
+
+
+def _current_url(driver) -> str | None:
+    try:
+        return driver.current_url
+    except Exception:
+        return None
+
+
+def _switch_to_window(driver, handle: str) -> bool:
+    try:
+        driver.switch_to.window(handle)
+        return True
+    except Exception:
+        return False
 
 
 def _wait_for_rendered_courses(driver, page_url: str, timeout: float) -> list[DiscoveredCourse]:

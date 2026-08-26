@@ -46,10 +46,16 @@ class FakeSwitchTo:
         self.driver = driver
 
     def new_window(self, _kind):
-        self.driver.window_handles.append("temporary")
-        self.driver.current_window_handle = "temporary"
+        self.driver.new_window_calls += 1
+        if self.driver.new_window_behavior == "raise":
+            raise RuntimeError("new tab failed")
+        if self.driver.new_window_behavior == "none":
+            return
+        self.driver._create_temporary(switch=True)
 
     def window(self, handle):
+        if handle not in self.driver.window_handles:
+            raise RuntimeError(f"missing window: {handle}")
         self.driver.current_window_handle = handle
         self.driver.switched_to.append(handle)
 
@@ -68,24 +74,59 @@ class FakeAnchor:
 
 
 class FakeDriver:
-    def __init__(self, rendered_html="", *, fail_get=False, anchors=None):
-        self.window_handles = ["original"]
+    def __init__(
+        self,
+        rendered_html="",
+        *,
+        fail_get=False,
+        anchors=None,
+        new_window_behavior="create",
+        script_window_behavior="none",
+        extra_handles=(),
+        remove_temporary_during_get=False,
+        remove_original_during_get=False,
+    ):
+        self.window_handles = ["original", *extra_handles]
         self.current_window_handle = "original"
         self.switch_to = FakeSwitchTo(self)
         self.rendered_html = rendered_html
         self.fail_get = fail_get
         self.anchors = anchors or []
+        self.new_window_behavior = new_window_behavior
+        self.script_window_behavior = script_window_behavior
+        self.remove_temporary_during_get = remove_temporary_during_get
+        self.remove_original_during_get = remove_original_during_get
         self.closed = []
         self.get_calls = []
         self.switched_to = []
-        self.page_by_handle = {"original": "https://lms.hcmut.edu.vn/my/"}
+        self.new_window_calls = 0
+        self.page_by_handle = {
+            handle: f"https://lms.hcmut.edu.vn/{handle}/"
+            for handle in self.window_handles
+        }
+        self.page_by_handle["original"] = "https://lms.hcmut.edu.vn/my/"
 
     @property
     def page_source(self):
         return self.rendered_html
 
+    @property
+    def current_url(self):
+        return self.page_by_handle.get(self.current_window_handle, "")
+
+    def _create_temporary(self, *, switch):
+        if "temporary" not in self.window_handles:
+            self.window_handles.append("temporary")
+            self.page_by_handle["temporary"] = "about:blank"
+        if switch:
+            self.current_window_handle = "temporary"
+
     def get(self, url):
         self.get_calls.append(url)
+        if self.remove_temporary_during_get and "temporary" in self.window_handles:
+            self.window_handles.remove("temporary")
+        if self.remove_original_during_get and "original" in self.window_handles:
+            self.window_handles.remove("original")
         if self.fail_get:
             raise RuntimeError("rendered discovery failed")
         self.page_by_handle[self.current_window_handle] = url
@@ -93,6 +134,12 @@ class FakeDriver:
     def execute_script(self, script):
         if script == "return document.readyState":
             return "complete"
+        if script == "window.open('about:blank', '_blank');":
+            if self.script_window_behavior == "raise":
+                raise RuntimeError("script tab failed")
+            if self.script_window_behavior == "create":
+                self._create_temporary(switch=False)
+            return None
         raise AssertionError(f"Unexpected script: {script}")
 
     def find_elements(self, _by, selector):
@@ -101,6 +148,8 @@ class FakeDriver:
         return []
 
     def close(self):
+        if self.current_window_handle not in self.window_handles:
+            raise RuntimeError("cannot close missing window")
         self.closed.append(self.current_window_handle)
         self.window_handles.remove(self.current_window_handle)
 
@@ -184,6 +233,83 @@ def test_rendered_my_courses_html_parses_and_restores_original_tab():
     assert driver.closed == ["temporary"]
     assert driver.current_window_handle == "original"
     assert driver.page_by_handle["original"] == "https://lms.hcmut.edu.vn/my/"
+
+
+def test_verified_temporary_tab_is_the_only_tab_closed_and_all_original_tabs_remain():
+    rendered_html = (FIXTURES / "dashboard_cards.html").read_text(encoding="utf-8")
+    driver = FakeDriver(rendered_html, extra_handles=("course-tab",))
+
+    discover_courses_from_browser(driver, timeout=0)
+
+    assert driver.closed == ["temporary"]
+    assert driver.window_handles == ["original", "course-tab"]
+    assert driver.current_window_handle == "original"
+    assert driver.page_by_handle["original"] == "https://lms.hcmut.edu.vn/my/"
+
+
+def test_failed_new_tab_creation_uses_same_tab_without_closing_chrome_and_restores_url():
+    rendered_html = (FIXTURES / "dashboard_cards.html").read_text(encoding="utf-8")
+    driver = FakeDriver(
+        rendered_html,
+        new_window_behavior="none",
+        script_window_behavior="none",
+    )
+    original_url = driver.current_url
+
+    courses = discover_courses_from_browser(driver, timeout=0)
+
+    assert [course.course_id for course in courses] == ["2013", "1013"]
+    assert driver.closed == []
+    assert driver.window_handles == ["original"]
+    assert driver.current_window_handle == "original"
+    assert driver.current_url == original_url
+    assert driver.get_calls == [MY_COURSES_URL, original_url]
+
+
+def test_script_tab_fallback_must_still_verify_a_real_new_handle_before_cleanup():
+    rendered_html = (FIXTURES / "dashboard_cards.html").read_text(encoding="utf-8")
+    driver = FakeDriver(
+        rendered_html,
+        new_window_behavior="raise",
+        script_window_behavior="create",
+    )
+
+    discover_courses_from_browser(driver, timeout=0)
+
+    assert driver.closed == ["temporary"]
+    assert driver.current_window_handle == "original"
+
+
+def test_missing_temporary_handle_never_closes_another_window():
+    rendered_html = (FIXTURES / "dashboard_cards.html").read_text(encoding="utf-8")
+    driver = FakeDriver(rendered_html, remove_temporary_during_get=True)
+
+    courses = discover_courses_from_browser(driver, timeout=0)
+
+    assert [course.course_id for course in courses] == ["2013", "1013"]
+    assert driver.closed == []
+    assert driver.window_handles == ["original"]
+    assert driver.current_window_handle == "original"
+
+
+def test_user_closed_temporary_tab_during_discovery_is_a_safe_empty_result():
+    driver = FakeDriver(fail_get=True, remove_temporary_during_get=True)
+
+    assert discover_courses_from_browser(driver, timeout=0) == []
+    assert driver.closed == []
+    assert driver.window_handles == ["original"]
+    assert driver.current_window_handle == "original"
+
+
+def test_missing_original_handle_never_closes_the_temporary_window():
+    rendered_html = (FIXTURES / "dashboard_cards.html").read_text(encoding="utf-8")
+    driver = FakeDriver(rendered_html, remove_original_during_get=True)
+
+    discover_courses_from_browser(driver, timeout=0)
+
+    assert driver.closed == []
+    assert driver.window_handles == ["temporary"]
+    assert driver.current_window_handle == "temporary"
 
 
 def test_browser_direct_anchor_fallback_handles_rendered_dom():
