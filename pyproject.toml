@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bk-lms-downloader"
+version = "0.1.0"
+description = "Unofficial BK-LMS course material downloader for HCMUT students"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+  {name = "BK-LMS Downloader contributors"}
+]
+keywords = ["moodle", "hcmut", "bk-lms", "downloader", "education"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Education",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Operating System :: Microsoft :: Windows",
+]
+dependencies = [
+  "requests>=2.31,<3",
+  "beautifulsoup4>=4.12,<5",
+  "selenium>=4.20,<5",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8,<9",
+  "pyinstaller>=6.10,<7",
+]
+ai = [
+  "beautifulsoup4>=4.12,<5",
+  "markdownify>=0.13,<1",
+  "pymupdf>=1.24,<2",
+  "python-pptx>=1.0,<2",
+]
+
+[project.scripts]
+bklms = "bklms_downloader.cli:main"
+bklms-gui = "bklms_downloader.gui:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

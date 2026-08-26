@@ -1,0 +1,39 @@
+name: Bug report
+description: Report a BK-LMS course/module that does not download correctly
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include passwords, cookies, session data, or private course files.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      placeholder: v0.1.0
+    validations:
+      required: true
+  - type: dropdown
+    id: run_mode
+    attributes:
+      label: How did you run it?
+      options:
+        - Windows EXE / GUI
+        - Python GUI
+        - CLI
+    validations:
+      required: true
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: What happened?
+      description: Describe the Moodle activity type and what was missing/wrong.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log/error text
+      description: Remove personal/private information first.
+      render: shell

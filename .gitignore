@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Build / packaging
+build/
+dist/
+*.egg-info/
+*.spec
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Runtime data
+BK_LMS_Data/
+AI_Knowledge/
+test*/
+logs/
+*.part
+
+# Auth/session material - NEVER commit
+.env
+cookies.json
+session.json
+*.cookie
+
+# Local course lists
+courses.txt
