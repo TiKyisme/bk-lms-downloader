@@ -31,26 +31,60 @@ def ask_current_course(driver) -> str:
         wait_page(driver)
         if is_course_url(driver.current_url):
             return driver.current_url
-        print("Chưa phải URL course BK-LMS. Hãy mở course rồi thử lại.")
+        print(
+            "Chưa phải URL course BK-LMS. "
+            "Hãy mở course rồi thử lại."
+        )
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(
+    parser = argparse.ArgumentParser(
         prog="bklms",
-        description="Tải và sắp xếp tài liệu BK-LMS theo section/course.",
+        description=(
+            "Tải tài liệu BK-LMS và gom vào vài folder "
+            "dễ tìm (Bài giảng/Lab/Bài tập/...)."
+        ),
     )
-    p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
-    p.add_argument("--output", type=Path, default=DEFAULT_OUTPUT, help="Thư mục gốc để lưu")
-    p.add_argument("--course-url", help="URL một course BK-LMS")
-    p.add_argument("--courses-file", type=Path, help="TXT chứa nhiều course URL")
-    p.add_argument("--force", action="store_true", help="Tải lại file đã tồn tại")
-    p.add_argument("--max-depth", type=int, default=4, help="Độ sâu link Moodle, mặc định 4")
-    p.add_argument("--archive", action="store_true", help="Complete archive: giữ HTML + shortcut ngoài")
-    p.add_argument(
-        "--no-follow-linked-courses", action="store_true",
-        help="Không crawl course học liệu được liên kết từ course chính",
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
     )
-    return p
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=DEFAULT_OUTPUT,
+        help="Thư mục gốc để lưu",
+    )
+    parser.add_argument(
+        "--course-url",
+        help="URL một course BK-LMS",
+    )
+    parser.add_argument(
+        "--courses-file",
+        type=Path,
+        help="TXT chứa nhiều course URL",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Tải lại file đã tồn tại",
+    )
+    parser.add_argument(
+        "--max-depth",
+        type=int,
+        default=4,
+        help="Độ sâu link Moodle, mặc định 4",
+    )
+    parser.add_argument(
+        "--no-follow-linked-courses",
+        action="store_true",
+        help=(
+            "Không crawl course học liệu được liên kết "
+            "từ course chính"
+        ),
+    )
+    return parser
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -66,7 +100,9 @@ def main(argv: list[str] | None = None) -> int:
         wait_page(driver)
 
         print("\nĐăng nhập BK-LMS trực tiếp trong Chrome.")
-        print("Tool không yêu cầu và không lưu mật khẩu của bạn.")
+        print(
+            "Tool không yêu cầu và không lưu mật khẩu của bạn."
+        )
         input("Đăng nhập xong thì nhấn Enter tại đây...")
         wait_page(driver)
         session = make_session(driver)
@@ -74,27 +110,44 @@ def main(argv: list[str] | None = None) -> int:
         if args.courses_file:
             course_urls = load_course_urls(args.courses_file)
             if not course_urls:
-                raise RuntimeError("File courses không có URL BK-LMS hợp lệ.")
+                raise RuntimeError(
+                    "File courses không có URL BK-LMS hợp lệ."
+                )
         elif args.course_url:
             if not is_course_url(args.course_url):
-                raise RuntimeError("--course-url không hợp lệ.")
+                raise RuntimeError(
+                    "--course-url không hợp lệ."
+                )
             course_urls = [args.course_url]
         else:
             course_urls = [ask_current_course(driver)]
             session = make_session(driver)
 
-        for i, course_url in enumerate(course_urls, start=1):
+        for index, course_url in enumerate(
+            course_urls,
+            start=1,
+        ):
             if len(course_urls) > 1:
-                print(f"\n******** COURSE {i}/{len(course_urls)} ********")
+                print(
+                    f"\n******** COURSE "
+                    f"{index}/{len(course_urls)} ********"
+                )
+
             downloader = DeepDownloader(
                 session=session,
                 output=output,
                 force=args.force,
                 max_depth=max(0, args.max_depth),
-                follow_linked_courses=not args.no_follow_linked_courses,
-                archive_mode=args.archive,
+                follow_linked_courses=(
+                    not args.no_follow_linked_courses
+                ),
             )
-            downloader.crawl_course(course_url, output, depth=0)
+            downloader.crawl_course(
+                course_url,
+                output,
+                depth=0,
+            )
+
         return 0
     except KeyboardInterrupt:
         print("\nĐã dừng.")

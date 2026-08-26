@@ -23,7 +23,6 @@ def test_video_response_is_always_skipped(tmp_path: Path):
         force=False,
         max_depth=4,
         follow_linked_courses=True,
-        archive_mode=False,
     )
     response = make_response(
         "https://lms.hcmut.edu.vn/pluginfile.php/1/x/lecture.mp4",

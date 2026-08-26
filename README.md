@@ -1,95 +1,109 @@
 # BK-LMS Downloader
 
-Unofficial utility for downloading and organizing course materials from
-**BK-LMS (HCMUT)**.
+Unofficial utility for downloading and organizing course materials from **BK-LMS (HCMUT)**.
 
-The goal is simple: a student should be able to open the app, log in to BK-LMS
-in Chrome, paste a course link, choose a folder, and sync the course materials
-without manually clicking every PDF/PPTX/resource.
+> **Status:** v0.2.0 alpha. The crawler works on real BK-LMS course data, but Moodle courses can be structured differently. Please report edge cases.
 
-> **Status:** v0.1.1 alpha. The crawler is working on real BK-LMS course data,
-> but Moodle courses can be structured differently. Please report edge cases.
+## What changed in v0.2.0
 
-## What it does
+The downloader now uses a **compact output layout** instead of mirroring every Moodle folder level.
 
-- Opens Chrome so you sign in directly on the official BK-LMS website.
-- Downloads resources and keeps the LMS section/activity order.
-- Crawls deeper into Moodle Page / Folder / Book / URL / Lesson content.
-- Can follow a linked learning-material course.
-- Saves inline course/page text and assets for offline use.
-- Skips existing files on later runs, so it can be used as a lightweight sync.
-- **Video files are always skipped**. This project focuses on study documents and avoids unexpectedly downloading many GB.
-- Advanced users can use the CLI for one or many courses.
+- Removed **Complete Archive** mode.
+- Linked learning-material courses are still crawled, but their files are moved into the root course folders instead of creating `COURSE_.../nested/...` trees.
+- Sections such as `Lab 1` ... `Lab 8` are grouped into one `03_Lab` folder.
+- Assignment sections are grouped into `04_Bài tập`.
+- Lecture/chapter/week/slide sections are grouped into `02_Bài giảng`.
+- Textbooks and references are grouped into `05_Tài liệu tham khảo`.
+- Useful Moodle Page/inline text and images are saved directly in the same compact folder instead of `_inline_content/assets/...`.
+- Technical JSON metadata is moved into a single `_meta` folder.
+- Video files are always skipped.
+
+## Output example
+
+Instead of a deep tree like:
+
+```text
+Course/
+└── 00_Chung/
+    └── 01_Linked course/
+        └── COURSE_.../
+            ├── 05_Lab 1/
+            │   └── nested/
+            └── 12_Lab 8/
+```
+
+v0.2.0 produces:
+
+```text
+Course/
+├── 01_Thông tin môn học/
+├── 02_Bài giảng/
+├── 03_Lab/
+│   ├── Lab 1_ Introduction - guide.pdf
+│   ├── Lab 1_ Introduction - topology.pkt
+│   ├── ...
+│   └── Lab 8_ Wireless Network - worksheet.pdf
+├── 04_Bài tập/
+├── 05_Tài liệu tham khảo/
+├── 06_Khác/
+└── _meta/
+    ├── course_structure.json
+    ├── download_manifest.json
+    └── stats.json
+```
+
+The LMS can still be crawled deeply; **only the saved output is flattened**. Filenames are prefixed with their source section/activity where useful so files from different labs or chapters do not become ambiguous.
 
 ## Easiest way to use it on Windows
 
-For public releases, download:
+For public releases, download `BK-LMS-Downloader.exe` from the repository **Releases** page and double-click it.
 
-```text
-BK-LMS-Downloader.exe
-```
-
-from the repository's **Releases** page and double-click it.
-
-The GUI flow is:
+GUI flow:
 
 1. Click **Mở Chrome để đăng nhập**.
 2. Log in to BK-LMS in the Chrome window.
-3. Paste a course URL such as:
-   `https://lms.hcmut.edu.vn/course/view.php?id=123456`
+3. Paste a course URL such as `https://lms.hcmut.edu.vn/course/view.php?id=123456`.
 4. Choose an output folder.
 5. Click **TẢI / SYNC TÀI LIỆU**.
-6. When finished, click **Mở thư mục kết quả**.
+6. Click **Mở thư mục kết quả** when finished.
 
-The application never asks you to type your BK-LMS password into the app.
-Authentication is performed on the official website in Chrome.
+The application never asks you to type your BK-LMS password into the app. Authentication happens directly on the official BK-LMS website in Chrome.
 
-### Already downloaded files have broken Vietnamese names?
+## What it downloads
 
-v0.1.1 fixes new downloads. To repair an existing folder without re-downloading large files, preview the changes first:
+- PDF, PPT/PPTX, Word/Excel files, ZIPs and other study resources.
+- Moodle Page / Folder / Book / URL / Lesson content.
+- Images and downloadable assets embedded in useful course/page content.
+- Files inside a linked learning-material course.
+
+Interactive activities such as Forum, Quiz and Assignment submissions are not crawled as downloadable document trees.
+
+### Video
+
+Video download is intentionally **not supported**. MP4/MKV/WebM/MOV/AVI/M4V files are always skipped so the app does not unexpectedly download many GB.
+
+A linked course named “Video” can still be traversed: PDFs, slides, lab files and other non-video resources inside it are downloaded normally.
+
+## Vietnamese filenames
+
+v0.1.1+ repairs common Moodle/HTTP filename mojibake such as:
+
+```text
+CHÆ¯Æ NG 1_Giá»›i THIá»†U
+```
+
+into proper Unicode Vietnamese names.
+
+To repair files downloaded by an older release without re-downloading them:
 
 ```powershell
 python tools/repair_existing_filenames.py "D:\University\BK_LMS_Data\Tên môn"
 ```
 
-Then apply them:
+Preview first, then apply:
 
 ```powershell
 python tools/repair_existing_filenames.py "D:\University\BK_LMS_Data\Tên môn" --apply
-```
-
-## Download modes
-
-### Standard mode — recommended
-
-Default mode. It downloads learning files, saves useful Moodle page text/assets,
-and follows useful internal links without preserving every web artifact.
-
-### Complete archive
-
-Enable **Complete archive** in the GUI (or `--archive` in CLI) to also keep HTML
-snapshots and external-link shortcuts. This is useful for archival/research but
-creates a noisier folder tree.
-
-### Video
-
-Video download is intentionally **not supported**. MP4/MKV/WebM/etc. are always skipped so the app stays focused on PDFs, slides, documents, Moodle pages and other study files. Linked material courses are still crawled, so non-video files inside them can still be downloaded.
-
-## Output example
-
-```text
-BK_LMS_Data/
-└── Mạng máy tính (CO3093)_.../
-    ├── 00_Chung/
-    ├── 01_Thông tin môn học/
-    ├── 02_Textbook/
-    ├── 03_Cisco CCIE Professional Dev - Routing TCP_IP/
-    ├── 04_Reference design/
-    ├── 05_Chapter 1 - Introduction - Network edge Network Core/
-    ├── ...
-    ├── _course_structure.json
-    ├── _download_manifest.json
-    └── _stats.json
 ```
 
 ## Run from source
@@ -109,13 +123,13 @@ python -m pip install -U pip
 pip install -e .
 ```
 
-Start the GUI:
+Start GUI:
 
 ```powershell
 bklms-gui
 ```
 
-Or:
+or:
 
 ```powershell
 python app.py
@@ -131,15 +145,6 @@ bklms `
   --output "D:\University\BK_LMS_Data"
 ```
 
-Complete archive:
-
-```powershell
-bklms `
-  --course-url "https://lms.hcmut.edu.vn/course/view.php?id=123456" `
-  --output "D:\University\BK_LMS_Data" `
-  --archive
-```
-
 Multiple courses:
 
 ```powershell
@@ -148,34 +153,37 @@ Copy-Item courses.example.txt courses.txt
 bklms --courses-file courses.txt --output "D:\University\HK1"
 ```
 
-## Build the Windows EXE
+Do not follow linked learning-material courses:
 
-From PowerShell:
+```powershell
+bklms `
+  --course-url "https://lms.hcmut.edu.vn/course/view.php?id=123456" `
+  --no-follow-linked-courses
+```
+
+## Build the Windows EXE
 
 ```powershell
 .\scripts\build_windows.ps1
 ```
 
-The executable is generated at:
+Output:
 
 ```text
 dist\BK-LMS-Downloader.exe
 ```
 
-Git tags matching `v*` trigger the GitHub Actions release workflow, which builds
-the Windows EXE and attaches it to the GitHub Release automatically.
+Tags matching `v*` trigger the Windows GitHub Actions release workflow.
 
 ## Optional: prepare course files for AI study
 
-The repository also contains an experimental, separate tool:
+The repository also contains a separate experimental tool:
 
 ```text
 tools/prepare_ai_course.py
 ```
 
-It converts downloaded course material into Markdown/retrieval-friendly content.
-It is intentionally separate from the downloader so normal users do not need AI,
-Whisper, CUDA, or document-processing dependencies.
+It converts downloaded material into Markdown/retrieval-friendly content for AI study workflows. It is intentionally separate from the downloader.
 
 Install optional dependencies:
 
@@ -183,63 +191,36 @@ Install optional dependencies:
 pip install -r requirements-ai.txt
 ```
 
-The AI preparation tool can still process videos supplied from another source, but the BK-LMS downloader itself never downloads video files.
-
-## Project structure
-
-```text
-src/bklms_downloader/
-├── auth.py       # Chrome login -> authenticated requests session
-├── parser.py     # Moodle course/page parsing
-├── crawler.py    # deep crawler + downloader/sync engine
-├── gui.py        # student-friendly Windows GUI
-├── cli.py        # advanced/batch CLI
-├── utils.py
-├── models.py
-└── config.py
-
-tools/
-└── prepare_ai_course.py
-
-tests/
-.github/workflows/
-scripts/
-```
-
 ## Privacy and security
 
 - The app does not collect or store your BK-LMS username/password.
 - Login happens directly on the official BK-LMS site in Chrome.
 - Session cookies are used in memory during the current run.
-- Do not share downloaded private course content or authentication/session files.
+- Do not share private course content or authentication/session material.
 
 See [SECURITY.md](SECURITY.md).
 
 ## Disclaimer
 
-This is an **unofficial** student utility. It is not affiliated with, sponsored
-by, or endorsed by HCMUT or BK-LMS.
+This is an **unofficial** student utility. It is not affiliated with, sponsored by, or endorsed by HCMUT or BK-LMS.
 
-Use it only with courses and materials that your own account is legitimately
-authorized to access. Respect course policies, copyright, and the rights of
-instructors and content owners. The project is not intended to bypass access
-controls or permissions.
+Use it only with courses and materials that your account is legitimately authorized to access. Respect course policies, copyright, and the rights of instructors/content owners. The project is not intended to bypass access controls.
 
 ## Development roadmap
 
 - [x] Refactor prototype into a package
-- [x] GUI for single-course download/sync
-- [x] Video files always skipped
-- [x] Standard / Complete Archive modes
-- [x] CLI batch mode
+- [x] Single-course Windows GUI
+- [x] Deep Moodle crawling
+- [x] Permanent video skipping
+- [x] Vietnamese filename repair
+- [x] Compact output layout
+- [x] Group Lab / Assignment / Lecture sections
+- [x] Flatten linked-course output into root course folders
 - [x] Tests + GitHub Actions
-- [x] Automated Windows EXE release workflow
 - [ ] Test against more BK-LMS course/module layouts
 - [ ] My Courses / Sync All GUI
-- [x] Repair common Vietnamese filename mojibake from Moodle/HTTP headers
 - [ ] Better per-file progress and retry UI
 - [ ] Auto-update support
-- [ ] Optional AI preparation integration after downloader stabilizes
 
 ## Contributing
 
