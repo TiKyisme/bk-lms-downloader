@@ -3,7 +3,8 @@
 ## 1.0.0 - 2026-08-26
 
 - Stabilize the student-focused BK-LMS Downloader public release.
-- Include Chrome login, My Courses, manual/imported courses, remembered output
+- Include Chrome login, My Courses import from the authenticated `/my/courses.php`
+  page, manual/imported courses, remembered output
   folders, compact Sync selected / Sync all, passive updates, and optional local
   AI preparation.
 - Complete privacy, reliability, packaging, documentation, and release checks.
@@ -24,7 +25,7 @@
 
 ## 0.5.0 - 2026-08-26
 
-- Add **Nhập từ BK-LMS** course discovery with defensive Moodle dashboard parsing.
+- Add **Nhập từ BK-LMS** course discovery with defensive Moodle My Courses parsing.
 - Let students explicitly choose detected courses before saving them, while
   retaining manual URL entry as a fallback.
 

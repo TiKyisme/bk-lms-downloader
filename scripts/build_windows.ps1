@@ -24,6 +24,7 @@ $Python = Join-Path $Venv "Scripts\python.exe"
     --name "BK-LMS-Downloader" `
     --paths "src" `
     --collect-submodules bklms_downloader `
+    --collect-all customtkinter `
     --collect-all selenium `
     "app.py"
 
