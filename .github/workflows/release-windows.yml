@@ -40,6 +40,7 @@ jobs:
             --windowed `
             --name "BK-LMS-Downloader" `
             --paths "src" `
+            --collect-submodules bklms_downloader `
             --collect-all selenium `
             "app.py"
 

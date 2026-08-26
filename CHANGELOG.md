@@ -1,5 +1,60 @@
 # Changelog
 
+## 1.0.0 - 2026-08-26
+
+- Stabilize the student-focused BK-LMS Downloader public release.
+- Include Chrome login, My Courses, manual/imported courses, remembered output
+  folders, compact Sync selected / Sync all, passive updates, and optional local
+  AI preparation.
+- Complete privacy, reliability, packaging, documentation, and release checks.
+
+## 0.7.0 - 2026-08-26
+
+- Add conservative retries for transient requests, safe same-name file handling,
+  corrupt JSON backups, and redacted rotating application logs.
+- Harden the Windows PyInstaller build to collect package submodules.
+- Improve normal GUI error messages without exposing stack traces.
+
+## 0.6.0 - 2026-08-26
+
+- Add optional **Công cụ → Chuẩn bị cho AI** support for already downloaded
+  courses, reusing the local course-preparation tool.
+- Keep AI dependencies, cloud/API requirements, and video transcription out of
+  the normal downloader installation and workflow.
+
+## 0.5.0 - 2026-08-26
+
+- Add **Nhập từ BK-LMS** course discovery with defensive Moodle dashboard parsing.
+- Let students explicitly choose detected courses before saving them, while
+  retaining manual URL entry as a fallback.
+
+## 0.4.0 - 2026-08-26
+
+- Add a non-blocking GitHub Release update notice for newer stable versions.
+- Open the official release page only after the user explicitly clicks the notice.
+
+## 0.3.1 - 2026-08-26
+
+- Remember the last selected output directory when adding or editing courses.
+- Simplify the My Courses window around login, course selection, sync, and a
+  compact result/log area.
+- Remove the output-path column and large metric dashboard from the main list;
+  show the selected course's folder as a small detail line instead.
+- Keep existing v0.3.0 sync and download behavior unchanged.
+
+## 0.3.0 - 2026-08-26
+
+- Add the **My Courses** dashboard with persistent local course configuration.
+- Add course selection plus sequential **Sync selected** and **Sync all** actions
+  that reuse one authenticated in-memory session per batch.
+- Add per-course last-sync metadata, result statuses, course-code detection, and
+  a concise sync summary/activity log.
+- Keep Tkinter responsive by running Chrome/session and download work off the UI
+  thread and forwarding structured events through the existing queue pattern.
+- Add safe handling for damaged course configuration and duplicate course URLs.
+- Add CourseStore, SyncManager, course-code, and batch-failure regression tests.
+- Keep the compact output layout and permanently skip video files.
+
 ## 0.2.0 - 2026-08-26
 
 - Remove Complete Archive mode from GUI, CLI, and crawler.

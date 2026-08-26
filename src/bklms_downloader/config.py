@@ -5,6 +5,8 @@ LMS_HOST = "lms.hcmut.edu.vn"
 DEFAULT_OUTPUT = Path.home() / "Downloads" / "BK_LMS_Data"
 PAGE_TIMEOUT = 60
 REQUEST_TIMEOUT = 90
+MAX_REQUEST_ATTEMPTS = 3
+REQUEST_RETRY_BACKOFF = 0.4
 
 FILE_URL_MARKERS = ("/pluginfile.php/", "/draftfile.php/")
 INTERACTIVE_MODS = {

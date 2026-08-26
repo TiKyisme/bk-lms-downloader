@@ -2,6 +2,7 @@ import requests
 
 from bklms_downloader.utils import (
     activity_type,
+    extract_course_code,
     filename_from_response,
     is_course_url,
     is_video_url,
@@ -13,6 +14,12 @@ from bklms_downloader.utils import (
 def test_course_url():
     assert is_course_url("https://lms.hcmut.edu.vn/course/view.php?id=123456")
     assert not is_course_url("https://example.com/course/view.php?id=1")
+
+
+def test_extract_course_code_is_conservative():
+    assert extract_course_code("Mạng máy tính (TN) (CO3094)_NGUYỄN") == "CO3094"
+    assert extract_course_code("Mạng máy tính (CO3093)_Lớp") == "CO3093"
+    assert extract_course_code("Principles of Programming Languages") is None
 
 
 def test_activity_type():

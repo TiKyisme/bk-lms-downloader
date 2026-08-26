@@ -26,9 +26,9 @@ Thumbs.db
 # Runtime data
 BK_LMS_Data/
 AI_Knowledge/
-test_v*/
-test_output*/
-test_download*/
+/test_v2/
+/test_output/
+/test_download/
 logs/
 *.part
 

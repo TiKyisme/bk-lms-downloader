@@ -108,4 +108,5 @@ def test_linked_course_is_flattened_into_root_lab_folder(monkeypatch, tmp_path):
 
     all_dirs = [p.name for p in course_dir.rglob("*") if p.is_dir()]
     assert not any(name.startswith("COURSE_") for name in all_dirs)
+    assert "_inline_content" not in all_dirs
     assert "_meta" in all_dirs

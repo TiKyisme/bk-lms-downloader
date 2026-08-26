@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import re
+import time
 from pathlib import Path
 from typing import Callable, Iterable, Optional
 from urllib.parse import urljoin, urlparse
@@ -8,7 +10,13 @@ from urllib.parse import urljoin, urlparse
 import requests
 from bs4 import BeautifulSoup
 
-from .config import DEEP_MODS, INTERACTIVE_MODS, REQUEST_TIMEOUT
+from .config import (
+    DEEP_MODS,
+    INTERACTIVE_MODS,
+    MAX_REQUEST_ATTEMPTS,
+    REQUEST_RETRY_BACKOFF,
+    REQUEST_TIMEOUT,
+)
 from .layout import bucket_name_for_section, context_prefix
 from .models import Section
 from .parser import (
@@ -63,6 +71,8 @@ class DeepDownloader:
         self.manifest: list[dict] = []
         self.course_structures: list[dict] = []
         self.root_course_dir: Optional[Path] = None
+        self.root_course_name: Optional[str] = None
+        self.known_sources: dict[Path, str] = {}
 
         self.stats = {
             "downloaded": 0,
@@ -82,19 +92,43 @@ class DeepDownloader:
 
     def log(self, **record) -> None:
         self.manifest.append(record)
+        if record.get("path") and record.get("source"):
+            self.known_sources[Path(record["path"])] = str(record["source"])
         if record.get("status") == "error":
             detail = record.get("error") or record.get("source") or "Unknown error"
             self.emit("error", f"Lỗi: {detail}", **record)
 
     def fetch(self, url: str, stream: bool = True) -> requests.Response:
-        response = self.session.get(
-            url,
-            stream=stream,
-            allow_redirects=True,
-            timeout=REQUEST_TIMEOUT,
-        )
-        response.raise_for_status()
-        return response
+        for attempt in range(MAX_REQUEST_ATTEMPTS):
+            response: Optional[requests.Response] = None
+            try:
+                response = self.session.get(
+                    url,
+                    stream=stream,
+                    allow_redirects=True,
+                    timeout=REQUEST_TIMEOUT,
+                )
+                response.raise_for_status()
+                return response
+            except requests.RequestException as exc:
+                status_code = getattr(response, "status_code", 0) if response is not None else 0
+                if response is not None:
+                    response.close()
+                retryable = (
+                    isinstance(exc, (requests.ConnectionError, requests.Timeout))
+                    or (isinstance(exc, requests.HTTPError) and status_code >= 500)
+                ) and not isinstance(
+                    exc,
+                    (
+                        requests.exceptions.InvalidURL,
+                        requests.exceptions.MissingSchema,
+                        requests.exceptions.InvalidSchema,
+                    ),
+                )
+                if not retryable or attempt == MAX_REQUEST_ATTEMPTS - 1:
+                    raise
+                time.sleep(REQUEST_RETRY_BACKOFF * (2**attempt))
+        raise RuntimeError("Không thể tải tài nguyên BK-LMS.")
 
     def _bucket_dir(self, section_title: str) -> Path:
         if self.root_course_dir is None:
@@ -137,7 +171,7 @@ class DeepDownloader:
         if prefix:
             filename = safe_name(prefix + filename, 190)
 
-        target = dest_dir / filename
+        target = self._unique_target(dest_dir / filename, source)
         remote_size_raw = response.headers.get("Content-Length", "")
         remote_size = (
             int(remote_size_raw) if remote_size_raw.isdigit() else None
@@ -313,6 +347,30 @@ class DeepDownloader:
         # External shortcuts and raw HTML are intentionally not preserved.
         return [url for url in content_links if is_same_lms(url)]
 
+    def _unique_target(self, target: Path, source: str) -> Path:
+        """Keep same-named but distinct LMS resources from overwriting each other."""
+        candidate = target
+        index = 2
+        while candidate.exists() and self.known_sources.get(candidate) not in (None, source):
+            candidate = target.with_name(f"{target.stem} ({index}){target.suffix}")
+            index += 1
+        return candidate
+
+    def _load_known_sources(self, course_dir: Path) -> None:
+        manifest_path = course_dir / "_meta" / "download_manifest.json"
+        try:
+            records = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+            return
+        if not isinstance(records, list):
+            return
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            path, source = record.get("path"), record.get("source")
+            if path and source:
+                self.known_sources[Path(path)] = str(source)
+
     def crawl_moodle_link(
         self,
         url: str,
@@ -482,12 +540,9 @@ class DeepDownloader:
             )
 
     def link_title(self, url: str) -> Optional[str]:
+        response: Optional[requests.Response] = None
         try:
-            response = self.session.get(
-                url,
-                timeout=REQUEST_TIMEOUT,
-                allow_redirects=True,
-            )
+            response = self.fetch(url, stream=False)
             if not html_response(response):
                 return None
 
@@ -512,6 +567,9 @@ class DeepDownloader:
                         return text
         except Exception:
             return None
+        finally:
+            if response is not None:
+                response.close()
         return None
 
     def save_section_inline_content(
@@ -575,12 +633,7 @@ class DeepDownloader:
         print("#" * 78)
 
         try:
-            page = self.session.get(
-                course_url,
-                timeout=REQUEST_TIMEOUT,
-                allow_redirects=True,
-            )
-            page.raise_for_status()
+            page = self.fetch(course_url, stream=False)
         except Exception as exc:
             print(f"[ERR] Không mở được course: {exc}")
             self.stats["errors"] += 1
@@ -627,7 +680,9 @@ class DeepDownloader:
         if depth == 0:
             course_dir = parent_dir / safe_name(course_name, 150)
             self.root_course_dir = course_dir
+            self.root_course_name = course_name
             course_dir.mkdir(parents=True, exist_ok=True)
+            self._load_known_sources(course_dir)
         else:
             if self.root_course_dir is None:
                 raise RuntimeError("Linked course được crawl trước course gốc.")

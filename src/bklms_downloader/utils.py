@@ -111,6 +111,30 @@ def is_course_url(url: str) -> bool:
         return False
 
 
+def normalized_course_url(url: str) -> str:
+    """Return the stable Moodle course URL used for local duplicate detection."""
+    parsed = urlparse(url.strip())
+    course_ids = parse_qs(parsed.query).get("id", [])
+    if not course_ids:
+        return normalize_url(url)
+    return urlunparse(
+        (
+            parsed.scheme.lower(),
+            parsed.netloc.lower(),
+            parsed.path,
+            "",
+            f"id={course_ids[0]}",
+            "",
+        )
+    )
+
+
+def extract_course_code(name: str) -> str | None:
+    """Extract a conservative HCMUT course code such as ``CO3094`` or ``GE1013``."""
+    match = re.search(r"(?<![A-Z0-9])([A-Z]{2,4}\d{3,6})(?![A-Z0-9])", name or "", re.I)
+    return match.group(1).upper() if match else None
+
+
 def activity_type(url: str) -> str:
     path = urlparse(url).path.lower()
     m = re.search(r"/mod/([^/]+)/", path)
