@@ -7,7 +7,7 @@ The goal is simple: a student should be able to open the app, log in to BK-LMS
 in Chrome, paste a course link, choose a folder, and sync the course materials
 without manually clicking every PDF/PPTX/resource.
 
-> **Status:** v0.1.0 alpha. The crawler is working on real BK-LMS course data,
+> **Status:** v0.1.1 alpha. The crawler is working on real BK-LMS course data,
 > but Moodle courses can be structured differently. Please report edge cases.
 
 ## What it does
@@ -18,7 +18,7 @@ without manually clicking every PDF/PPTX/resource.
 - Can follow a linked learning-material course.
 - Saves inline course/page text and assets for offline use.
 - Skips existing files on later runs, so it can be used as a lightweight sync.
-- **Video download is OFF by default** to avoid unexpectedly downloading many GB.
+- **Video files are always skipped**. This project focuses on study documents and avoids unexpectedly downloading many GB.
 - Advanced users can use the CLI for one or many courses.
 
 ## Easiest way to use it on Windows
@@ -44,6 +44,20 @@ The GUI flow is:
 The application never asks you to type your BK-LMS password into the app.
 Authentication is performed on the official website in Chrome.
 
+### Already downloaded files have broken Vietnamese names?
+
+v0.1.1 fixes new downloads. To repair an existing folder without re-downloading large files, preview the changes first:
+
+```powershell
+python tools/repair_existing_filenames.py "D:\University\BK_LMS_Data\Tên môn"
+```
+
+Then apply them:
+
+```powershell
+python tools/repair_existing_filenames.py "D:\University\BK_LMS_Data\Tên môn" --apply
+```
+
 ## Download modes
 
 ### Standard mode — recommended
@@ -59,8 +73,7 @@ creates a noisier folder tree.
 
 ### Video
 
-Video is disabled by default. Enable **Tải video** only when you actually need
-course videos.
+Video download is intentionally **not supported**. MP4/MKV/WebM/etc. are always skipped so the app stays focused on PDFs, slides, documents, Moodle pages and other study files. Linked material courses are still crawled, so non-video files inside them can still be downloaded.
 
 ## Output example
 
@@ -118,15 +131,6 @@ bklms `
   --output "D:\University\BK_LMS_Data"
 ```
 
-Download videos too:
-
-```powershell
-bklms `
-  --course-url "https://lms.hcmut.edu.vn/course/view.php?id=123456" `
-  --output "D:\University\BK_LMS_Data" `
-  --download-video
-```
-
 Complete archive:
 
 ```powershell
@@ -179,8 +183,7 @@ Install optional dependencies:
 pip install -r requirements-ai.txt
 ```
 
-Video transcription is optional and not enabled unless explicitly requested by
-that tool.
+The AI preparation tool can still process videos supplied from another source, but the BK-LMS downloader itself never downloads video files.
 
 ## Project structure
 
@@ -226,13 +229,14 @@ controls or permissions.
 
 - [x] Refactor prototype into a package
 - [x] GUI for single-course download/sync
-- [x] Video opt-in
+- [x] Video files always skipped
 - [x] Standard / Complete Archive modes
 - [x] CLI batch mode
 - [x] Tests + GitHub Actions
 - [x] Automated Windows EXE release workflow
 - [ ] Test against more BK-LMS course/module layouts
 - [ ] My Courses / Sync All GUI
+- [x] Repair common Vietnamese filename mojibake from Moodle/HTTP headers
 - [ ] Better per-file progress and retry UI
 - [ ] Auto-update support
 - [ ] Optional AI preparation integration after downloader stabilizes

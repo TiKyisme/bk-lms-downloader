@@ -5,7 +5,7 @@ From the project directory:
 ```powershell
 git init
 git add .
-git commit -m "Release v0.1.0"
+git commit -m "Release v0.1.1"
 git branch -M main
 git remote add origin https://github.com/YOUR_USERNAME/bk-lms-downloader.git
 git push -u origin main
@@ -14,8 +14,8 @@ git push -u origin main
 Create the first release:
 
 ```powershell
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.1.1
+git push origin v0.1.1
 ```
 
 The `release-windows.yml` workflow will build `BK-LMS-Downloader.exe` on a

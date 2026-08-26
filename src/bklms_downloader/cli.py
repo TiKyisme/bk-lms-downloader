@@ -45,7 +45,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--courses-file", type=Path, help="TXT chứa nhiều course URL")
     p.add_argument("--force", action="store_true", help="Tải lại file đã tồn tại")
     p.add_argument("--max-depth", type=int, default=4, help="Độ sâu link Moodle, mặc định 4")
-    p.add_argument("--download-video", action="store_true", help="Tải video (mặc định: tắt)")
     p.add_argument("--archive", action="store_true", help="Complete archive: giữ HTML + shortcut ngoài")
     p.add_argument(
         "--no-follow-linked-courses", action="store_true",
@@ -93,7 +92,6 @@ def main(argv: list[str] | None = None) -> int:
                 force=args.force,
                 max_depth=max(0, args.max_depth),
                 follow_linked_courses=not args.no_follow_linked_courses,
-                download_video=args.download_video,
                 archive_mode=args.archive,
             )
             downloader.crawl_course(course_url, output, depth=0)

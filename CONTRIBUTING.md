@@ -29,7 +29,7 @@ bklms --help
 - Keep authentication browser-based; never add password collection.
 - Do not commit course materials, cookies, session files, or personal data.
 - Add/update tests for parser/crawler behavior where possible.
-- Keep video opt-in by default because course videos can be very large.
+- Do not add video downloading to the main downloader; video files are intentionally skipped to keep downloads lightweight.
 - Explain Moodle module edge cases in the PR description.
 
 ## Testing against BK-LMS

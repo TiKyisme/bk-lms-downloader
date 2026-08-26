@@ -28,7 +28,6 @@ class App(tk.Tk):
 
         self.course_var = tk.StringVar()
         self.output_var = tk.StringVar(value=str(DEFAULT_OUTPUT))
-        self.video_var = tk.BooleanVar(value=False)
         self.archive_var = tk.BooleanVar(value=False)
         self.linked_var = tk.BooleanVar(value=True)
         self.depth_var = tk.IntVar(value=4)
@@ -48,7 +47,7 @@ class App(tk.Tk):
         title.grid(row=0, column=0, sticky="w")
         ttk.Label(
             outer,
-            text="Tải tài liệu theo đúng section trên BK-LMS. Video mặc định tắt.",
+            text="Tải tài liệu học theo đúng section trên BK-LMS. Video luôn được bỏ qua.",
         ).grid(row=1, column=0, sticky="w", pady=(2, 16))
 
         login_frame = ttk.Frame(outer)
@@ -74,9 +73,9 @@ class App(tk.Tk):
 
         options = ttk.LabelFrame(outer, text="Tuỳ chọn", padding=10)
         options.grid(row=5, column=0, sticky="ew", pady=5)
-        ttk.Checkbutton(options, text="Tải video (có thể rất nặng)", variable=self.video_var).grid(row=0, column=0, sticky="w")
-        ttk.Checkbutton(options, text="Complete archive (HTML + link ngoài)", variable=self.archive_var).grid(row=1, column=0, sticky="w")
-        ttk.Checkbutton(options, text="Đi theo course học liệu liên kết", variable=self.linked_var).grid(row=2, column=0, sticky="w")
+        ttk.Checkbutton(options, text="Complete archive (HTML + link ngoài)", variable=self.archive_var).grid(row=0, column=0, sticky="w")
+        ttk.Checkbutton(options, text="Đi theo course học liệu liên kết", variable=self.linked_var).grid(row=1, column=0, sticky="w")
+        ttk.Label(options, text="Video: luôn bỏ qua để tiết kiệm dung lượng").grid(row=2, column=0, sticky="w", pady=(4, 0))
         ttk.Label(options, text="Độ sâu crawl:").grid(row=0, column=1, padx=(30, 6), sticky="e")
         ttk.Spinbox(options, from_=0, to=8, width=5, textvariable=self.depth_var).grid(row=0, column=2, sticky="w")
 
@@ -214,7 +213,6 @@ class App(tk.Tk):
 
         max_depth = max(0, int(self.depth_var.get()))
         follow_linked = bool(self.linked_var.get())
-        download_video = bool(self.video_var.get())
         archive_mode = bool(self.archive_var.get())
 
         self.download_btn.configure(state="disabled")
@@ -224,7 +222,7 @@ class App(tk.Tk):
         self._log("=" * 64)
         self._log(f"Course: {course_url}")
         self._log(f"Output: {output}")
-        self._log(f"Video: {'ON' if download_video else 'OFF'}")
+        self._log("Video: SKIP (không hỗ trợ tải video)")
 
         def worker():
             try:
@@ -236,7 +234,6 @@ class App(tk.Tk):
                     force=False,
                     max_depth=max_depth,
                     follow_linked_courses=follow_linked,
-                    download_video=download_video,
                     archive_mode=archive_mode,
                     event_callback=self._emit_from_worker,
                 )

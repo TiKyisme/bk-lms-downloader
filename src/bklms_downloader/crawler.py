@@ -27,7 +27,6 @@ class DeepDownloader:
         force: bool = False,
         max_depth: int = 4,
         follow_linked_courses: bool = True,
-        download_video: bool = False,
         archive_mode: bool = False,
         event_callback: Optional[EventCallback] = None,
     ):
@@ -36,7 +35,6 @@ class DeepDownloader:
         self.force = force
         self.max_depth = max_depth
         self.follow_linked_courses = follow_linked_courses
-        self.download_video = download_video
         self.archive_mode = archive_mode
         self.event_callback = event_callback
         self.visited: set[str] = set()
@@ -82,11 +80,12 @@ class DeepDownloader:
         context: str,
         prefix: str = "",
     ) -> Optional[Path]:
-        if not self.download_video and is_video_response(response):
+        # v0.1.1+: video downloading is intentionally not supported.
+        if is_video_response(response):
             self.stats["skipped_video"] += 1
             self.log(status="skipped_video", context=context, source=source, final_url=response.url)
             self.emit("video_skipped", f"Bỏ qua video: {fallback}", source=source)
-            print(f"    [VIDEO OFF] {fallback}")
+            print(f"    [VIDEO SKIP] {fallback}")
             response.close()
             return None
 
@@ -162,11 +161,12 @@ class DeepDownloader:
                 continue
             seen.add(url)
 
-            if not self.download_video and is_video_url(url):
+            # Video is always skipped; there is no opt-in download switch.
+            if is_video_url(url):
                 self.stats["skipped_video"] += 1
                 self.log(status="skipped_video", context=context, source=url)
                 self.emit("video_skipped", f"Bỏ qua video: {label or url}", source=url)
-                print(f"    [VIDEO OFF] {label or url}")
+                print(f"    [VIDEO SKIP] {label or url}")
                 continue
 
             try:
@@ -539,7 +539,7 @@ class DeepDownloader:
         print("HOÀN TẤT COURSE")
         print(f"Files tải mới : {self.stats['downloaded']}")
         print(f"Files skip    : {self.stats['skipped']}")
-        print(f"Video bỏ qua : {self.stats['skipped_video']}")
+        print(f"Video bỏ qua : {self.stats['skipped_video']} (video không được hỗ trợ)")
         print(f"Pages lưu     : {self.stats['pages_saved']}")
         print(f"Shortcuts     : {self.stats['shortcuts']}")
         print(f"Errors        : {self.stats['errors']}")
