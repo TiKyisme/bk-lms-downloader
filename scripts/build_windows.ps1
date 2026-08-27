@@ -37,8 +37,16 @@ if (-not (Test-Path $Exe)) {
     throw "Build finished but EXE was not found: $Exe"
 }
 
-& $Exe --self-test-ai
-if ($LASTEXITCODE -ne 0) {
+$SelfTest = Start-Process `
+    -FilePath $Exe `
+    -ArgumentList "--self-test-ai" `
+    -Wait `
+    -PassThru `
+    -WindowStyle Hidden
+if ($SelfTest.ExitCode -ne 0) {
+    if (Test-Path "ai-self-test-error.log") {
+        Get-Content "ai-self-test-error.log"
+    }
     throw "Packaged AI runtime smoke failed."
 }
 

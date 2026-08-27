@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.5 - 2026-08-27
+
+- Make the release gate wait for the windowed packaged AI self-test process and
+  preserve diagnostic tracebacks when that gate fails.
+
 ## 1.0.4 - 2026-08-27
 
 - Clean BK-LMS accessibility prefixes from imported course names while

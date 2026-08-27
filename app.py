@@ -2,6 +2,7 @@ from pathlib import Path
 import importlib
 import sys
 import tempfile
+import traceback
 
 # Allow `python app.py` from a source checkout without installing the package.
 src_dir = Path(__file__).resolve().parent / "src"
@@ -64,8 +65,18 @@ def _ai_runtime_smoke() -> None:
         if not all(path.is_file() for path in required_outputs):
             raise RuntimeError("AI runtime self-test did not create required outputs")
 
+
+def _run_ai_runtime_smoke() -> int:
+    """Return a process exit code and persist diagnostics for windowed builds."""
+    try:
+        _ai_runtime_smoke()
+    except Exception:
+        Path("ai-self-test-error.log").write_text(traceback.format_exc(), encoding="utf-8")
+        return 1
+    return 0
+
 if __name__ == "__main__":
     if "--self-test-ai" in sys.argv:
-        _ai_runtime_smoke()
+        raise SystemExit(_run_ai_runtime_smoke())
     else:
         main()

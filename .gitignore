@@ -17,6 +17,7 @@ dist/
 *.egg-info/
 *.spec
 /BK-LMS-Downloader.exe
+/ai-self-test-error.log
 
 # IDE / OS
 .vscode/
