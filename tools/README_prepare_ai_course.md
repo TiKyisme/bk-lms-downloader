@@ -104,6 +104,13 @@ python prepare_ai_course.py `
 
 ```text
 AI_Knowledge/
+├─ START_HERE.md
+├─ COURSE_MAP.md
+├─ COVERAGE_REPORT.md
+├─ TUTOR_PROTOCOL.md
+├─ CHATGPT_START_PROMPT.txt
+├─ chapters/
+├─ sources/
 ├─ AI_TUTOR_CONTEXT.md
 ├─ course_index.md
 ├─ processing_report.md
@@ -128,8 +135,13 @@ AI_Knowledge/
    ├─ documents.jsonl
    ├─ documents.csv
    ├─ stats.json
-   └─ raw_downloader_metadata/
+└─ raw_downloader_metadata/
 ```
+
+The preparation also creates `<course name> - AI Study Pack.zip` beside
+`AI_Knowledge`. It is the portable, ChatGPT-ready export. Use
+`python -m bklms_downloader.ai_study_pack --validate-ai-pack <AI_Knowledge>`
+to run the structural validator before sharing a pack.
 
 ### File quan trọng nhất để feed AI
 

@@ -47,7 +47,7 @@ if ($SelfTest.ExitCode -ne 0) {
     if (Test-Path "ai-self-test-error.log") {
         Get-Content "ai-self-test-error.log"
     }
-    throw "Packaged AI runtime smoke failed."
+    throw "Packaged AI Study Pack validation failed."
 }
 
 Write-Host "" 

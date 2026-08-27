@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.7 - 2026-08-28
+
+- Generate a portable ChatGPT-ready AI Study Pack with course map, coverage
+  report, tutor protocol, chapter-level teaching documents, starter prompt, and
+  retained lecturer visual sources.
+- Detect chapter ranges such as `Ch3_4`, report potential source gaps, account
+  for duplicate/link-only/media/unsupported sources, and validate ZIP round trips.
+- Improve student-facing selection, sync, and AI completion guidance.
+
 ## 1.0.6 - 2026-08-27
 
 - Fix frozen-Windows false "pypdf missing" failures by validating AI readers

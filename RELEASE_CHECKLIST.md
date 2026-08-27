@@ -1,4 +1,4 @@
-# BK-LMS Downloader v1.0.6 release checklist
+# BK-LMS Downloader v1.0.7 release checklist
 
 Complete this manual checklist before creating the public tag.
 
@@ -28,6 +28,15 @@ Complete this manual checklist before creating the public tag.
 - [ ] Packaged EXE requires no Python or pip installation for AI preparation.
 - [ ] Packaged `BK-LMS-Downloader.exe --self-test-ai` exits successfully.
 - [ ] Packaged `BK-LMS-Downloader.exe --diagnose-ai` reports all AI imports and synthetic batch success.
+- [ ] AI Study Pack accounts for every discovered source.
+- [ ] Chapter/module detection works for `Ch1`, `Ch 2`, `Ch3_4`, and `Chapter 3-4`.
+- [ ] Missing chapter gaps are reported without invented content.
+- [ ] START_HERE, COURSE_MAP, COVERAGE_REPORT, chapter documents, and starter prompt exist.
+- [ ] AI Study Pack ZIP round-trip validator passes with no structural errors.
+- [ ] Study Pack contains no credentials, private absolute metadata paths, or application logs.
+- [ ] Original lecturer visual sources remain accessible from the Study Pack.
+- [ ] Student can identify the AI Study Pack ZIP and starter prompt after preparation.
+- [ ] GUI has no obsolete current-course Delete or AI modes at common laptop sizes.
 - [ ] No credentials, cookies, or session material are present in repository files or logs.
 - [ ] README screenshot and download instructions are current.
-- [ ] Create `v1.0.6` only after all above smoke tests pass.
+- [ ] Create `v1.0.7` only after all above smoke tests pass.

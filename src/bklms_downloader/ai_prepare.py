@@ -6,6 +6,7 @@ import io
 import sys
 import tempfile
 import traceback
+import zipfile
 from contextlib import redirect_stdout
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,6 +14,7 @@ from types import ModuleType, SimpleNamespace
 from typing import Callable, Iterable
 
 from .app_logging import get_logger
+from .ai_study_pack import validate_ai_study_pack
 from .models import Course
 
 
@@ -139,6 +141,11 @@ def _ai_runtime_self_test() -> Path:
         if output is None:
             raise RuntimeError("AI batch self-test returned no output")
         required_outputs = (
+            output / "START_HERE.md",
+            output / "COURSE_MAP.md",
+            output / "COVERAGE_REPORT.md",
+            output / "TUTOR_PROTOCOL.md",
+            output / "CHATGPT_START_PROMPT.txt",
             output / "AI_TUTOR_CONTEXT.md",
             output / "course_index.md",
             output / "processing_report.md",
@@ -146,6 +153,20 @@ def _ai_runtime_self_test() -> Path:
         )
         if not all(path.is_file() for path in required_outputs):
             raise RuntimeError("AI runtime self-test did not create required outputs")
+        validation = validate_ai_study_pack(output)
+        if validation.errors:
+            raise RuntimeError("AI Study Pack validation failed: " + "; ".join(validation.errors))
+        packs = list(output.parent.glob("* - AI Study Pack.zip"))
+        if len(packs) != 1:
+            raise RuntimeError("AI runtime self-test did not create one ChatGPT-ready ZIP")
+        with tempfile.TemporaryDirectory(prefix="bklms_ai_pack_roundtrip_") as unpacked:
+            with zipfile.ZipFile(packs[0]) as archive:
+                archive.extractall(unpacked)
+            unpacked_validation = validate_ai_study_pack(Path(unpacked))
+        if unpacked_validation.errors:
+            raise RuntimeError(
+                "AI Study Pack ZIP round-trip failed: " + "; ".join(unpacked_validation.errors)
+            )
         return output
 
 
@@ -160,7 +181,8 @@ def run_ai_runtime_self_test() -> int:
         )
         return 1
     Path("ai-self-test-diagnostics.log").write_text(
-        ai_runtime_diagnostics() + f"\nSynthetic batch: OK\nAI_Knowledge: {output}\n",
+        ai_runtime_diagnostics()
+        + f"\nSynthetic batch: OK\nAI Study Pack: OK\nAI_Knowledge: {output}\n",
         encoding="utf-8",
     )
     return 0
@@ -177,7 +199,7 @@ def run_ai_runtime_diagnostics() -> int:
             encoding="utf-8",
         )
         return 1
-    report += f"\nSynthetic batch: OK\nAI_Knowledge: {output}"
+    report += f"\nSynthetic batch: OK\nAI Study Pack: OK\nAI_Knowledge: {output}"
     Path("ai-self-test-diagnostics.log").write_text(report + "\n", encoding="utf-8")
     try:
         print(report)

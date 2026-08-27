@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "bk-lms-downloader"
-version = "1.0.6"
+version = "1.0.7"
 description = "Unofficial BK-LMS course material downloader for HCMUT students"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -38,6 +38,7 @@ dependencies = [
 dev = [
   "pytest>=8,<9",
   "pyinstaller>=6.10,<7",
+  "reportlab>=4,<5",
 ]
 [project.scripts]
 bklms = "bklms_downloader.cli:main"

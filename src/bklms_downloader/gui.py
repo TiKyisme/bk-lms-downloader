@@ -613,7 +613,9 @@ class App(ctk.CTk):
         self.icons = self._create_icons()
 
         self.login_status_var = tk.StringVar(value="Chưa đăng nhập")
-        self.course_detail_var = tk.StringVar(value="Chọn course để xem thư mục lưu.")
+        self.course_detail_var = tk.StringVar(
+            value="Đánh dấu checkbox để đồng bộ, xóa hoặc chuẩn bị course cho AI."
+        )
         self.overall_var = tk.StringVar(value="Chưa có phiên đồng bộ")
         self.current_course_var = tk.StringVar(value="Sẵn sàng đồng bộ")
         self.summary_var = tk.StringVar(value="Chưa có kết quả đồng bộ.")
@@ -802,7 +804,7 @@ class App(ctk.CTk):
         sync_actions.grid(row=4, column=0, sticky="w", padx=14, pady=(0, 14))
         self.sync_selected_btn = ctk.CTkButton(
             sync_actions,
-            text="Sync selected",
+            text="Đồng bộ đã chọn",
             image=self.icons["sync"],
             compound="left",
             command=lambda: self._start_sync(True),
@@ -819,7 +821,7 @@ class App(ctk.CTk):
         self.sync_selected_btn.pack(side="left", padx=(0, 10))
         self.sync_all_btn = ctk.CTkButton(
             sync_actions,
-            text="Sync all",
+            text="Đồng bộ tất cả",
             image=self.icons["sync_white"],
             compound="left",
             command=lambda: self._start_sync(False),
@@ -999,7 +1001,9 @@ class App(ctk.CTk):
             self.current_course_id = None
             self.course_detail_var.set("Chưa có course. Hãy thêm course đầu tiên của bạn.")
         else:
-            self.course_detail_var.set("Chọn course để xem thư mục lưu.")
+            self.course_detail_var.set(
+                "Đánh dấu checkbox để đồng bộ, xóa hoặc chuẩn bị course cho AI."
+            )
 
     @staticmethod
     def _format_last_sync(value: str | None) -> str:
@@ -1036,7 +1040,10 @@ class App(ctk.CTk):
     def _show_course_detail(self, course_id: str) -> None:
         course = self.store.get(course_id)
         if course is not None:
-            self.course_detail_var.set(f"Thư mục lưu: {course.output}")
+            self.course_detail_var.set(
+                f"{course.display_name} • Thư mục lưu: {course.output} • "
+                "Checkbox dùng cho Đồng bộ, Xóa và Chuẩn bị cho AI."
+            )
 
     def _selected_course(self) -> Course | None:
         course = self.store.get(self.current_course_id or "")
@@ -1524,9 +1531,21 @@ class App(ctk.CTk):
         )
 
         if not failed:
+            packs = [
+                next(result.output.parent.glob("* - AI Study Pack.zip"), None)
+                for result in succeeded
+                if result.output is not None
+            ]
+            pack_lines = [str(pack) for pack in packs if pack is not None]
+            next_step = (
+                "\n\nBước tiếp theo: mở thư mục course, upload file “AI Study Pack.zip” vào ChatGPT, "
+                "rồi dùng CHATGPT_START_PROMPT.txt trong gói."
+            )
+            location = f"\n\nGói đầu tiên: {pack_lines[0]}" if pack_lines else ""
             messagebox.showinfo(
                 "Chuẩn bị cho AI",
-                f"Đã chuẩn bị {len(succeeded)} course cho AI.",
+                f"Đã chuẩn bị {len(succeeded)}/{total} course cho AI."
+                f"{location}{next_step}",
                 parent=self,
             )
             return

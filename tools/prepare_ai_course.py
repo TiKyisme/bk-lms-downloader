@@ -50,10 +50,21 @@ import textwrap
 import unicodedata
 import zipfile
 from collections import Counter, defaultdict
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable, Optional
+
+
+_PROJECT_SRC = Path(__file__).resolve().parents[1] / "src"
+if _PROJECT_SRC.is_dir() and str(_PROJECT_SRC) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_SRC))
+
+from bklms_downloader.ai_study_pack import (
+    create_chatgpt_study_pack,
+    validate_ai_study_pack,
+    write_study_navigation,
+)
 
 
 # -----------------------------------------------------------------------------
@@ -71,6 +82,7 @@ URL_EXTS = {".url"}
 JSON_EXTS = {".json"}
 
 SKIP_DIR_NAMES = {
+    "AI_Knowledge",
     "__MACOSX",
     ".git",
     ".idea",
@@ -78,6 +90,7 @@ SKIP_DIR_NAMES = {
     "node_modules",
     "duylms_forum_debug",
 }
+STUDY_PACK_SUFFIX = " - AI Study Pack.zip"
 
 REFERENCE_HINTS = (
     "textbook",
@@ -139,6 +152,9 @@ class DocumentRecord:
     words: int = 0
     units: int = 0  # pages/slides/segments/etc.
     note: str = ""
+    chapters: list[int] = field(default_factory=list)
+    order: int = 0
+    source_copy_path: Optional[str] = None
 
 
 @dataclass
@@ -154,6 +170,7 @@ class ChunkRecord:
     locator: str
     text: str
     chunk_path: str
+    chapters: list[int] = field(default_factory=list)
 
 
 # -----------------------------------------------------------------------------
@@ -235,29 +252,42 @@ def is_reference_path(path: Path) -> bool:
     return any(hint in h for hint in REFERENCE_HINTS)
 
 
+def chapter_numbers_from_path(path: Path) -> list[int]:
+    """Detect explicit chapter numbers/ranges without mistaking order prefixes."""
+    text = " / ".join(path.parts)
+    range_pattern = re.compile(
+        r"(?i)(?<![a-z])(?:chapter|ch)\s*0*(\d{1,2})\s*"
+        r"(?:[_\-–—&]|\band\b|\bto\b)\s*"
+        r"(?:(?:chapter|ch)\s*)?0*(\d{1,2})"
+    )
+    match = range_pattern.search(text)
+    if match:
+        start, end = sorted((int(match.group(1)), int(match.group(2))))
+        if 0 < start < 100 and 0 < end < 100:
+            return list(range(start, end + 1))
+
+    single_pattern = re.compile(r"(?i)(?<![a-z])(?:chapter|ch)\s*0*(\d{1,2})")
+    matches = [int(match.group(1)) for match in single_pattern.finditer(text)]
+    matches = [number for number in matches if 0 < number < 100]
+    return [matches[-1]] if matches else []
+
+
+def chapter_numbers_from_group(group: str, chapter: Optional[int] = None) -> list[int]:
+    values = [int(value) for value in re.findall(r"\d+", group or "")]
+    if values:
+        return values
+    return [chapter] if chapter is not None else []
+
+
 def chapter_from_path(path: Path) -> Optional[int]:
-    h = " / ".join(path.parts)
-    patterns = [
-        r"(?i)chapter[ _-]*(\d{1,2})",
-        r"(?i)\bch[ _-]*(\d{1,2})\b",
-    ]
-    matches: list[int] = []
-    for pat in patterns:
-        for m in re.finditer(pat, h):
-            try:
-                n = int(m.group(1))
-                if 0 < n < 100:
-                    matches.append(n)
-            except Exception:
-                pass
-    # Deepest path usually appears last and is the best signal.
-    return matches[-1] if matches else None
+    numbers = chapter_numbers_from_path(path)
+    return numbers[0] if numbers else None
 
 
 def classify_group(path: Path) -> tuple[str, Optional[int]]:
-    ch = chapter_from_path(path)
-    if ch is not None:
-        return f"chapter_{ch:02d}", ch
+    chapters = chapter_numbers_from_path(path)
+    if chapters:
+        return "chapter_" + "_".join(f"{chapter:02d}" for chapter in chapters), chapters[0]
 
     h = path_haystack(path)
     if any(hint in h for hint in COURSE_META_HINTS):
@@ -274,11 +304,16 @@ def source_id_for(path: Path, root: Path, source_type: str) -> str:
     return f"src_{short_hash(key, 12)}"
 
 
+def source_order_hint(source_path: str) -> int:
+    match = re.match(r"\s*0*(\d{1,3})(?:[_ .-]|$)", Path(source_path).name)
+    return int(match.group(1)) if match else 9999
+
+
 def choose_group_dir(kb_docs_dir: Path, group: str) -> Path:
     if group == "00_course":
         return kb_docs_dir / "00_course"
     if group.startswith("chapter_"):
-        return kb_docs_dir / group
+        return kb_docs_dir / "chapters" / group
     if group == "references":
         return kb_docs_dir / "references"
     return kb_docs_dir / "other"
@@ -335,6 +370,8 @@ def iter_source_files(root: Path) -> list[Path]:
         if not path.is_file():
             continue
         if any(part in SKIP_DIR_NAMES for part in path.parts):
+            continue
+        if path.name.endswith(STUDY_PACK_SUFFIX):
             continue
         # Ignore downloader metadata as teaching content; still index separately later.
         results.append(path)
@@ -608,6 +645,7 @@ def make_chunks(
     priority: int,
     group: str,
     chapter: Optional[int],
+    chapters: list[int],
     units: list[tuple[str, str]],
     fallback_text: str,
     chunk_dir: Path,
@@ -625,6 +663,8 @@ def make_chunks(
             ordinal += 1
             chunk_id = f"{source_id}_c{ordinal:04d}"
             group_dir = chunk_dir / group
+            if group.startswith("chapter_"):
+                group_dir = chunk_dir / "chapters" / group
             chunk_path = group_dir / f"{chunk_id}.md"
 
             md = (
@@ -637,6 +677,7 @@ def make_chunks(
                 f"priority: {priority}\n"
                 f"group: {yaml_escape(group)}\n"
                 f"chapter: {json.dumps(chapter)}\n"
+                f"chapters: {json.dumps(chapters)}\n"
                 f"locator: {yaml_escape(locator)}\n"
                 "---\n\n"
                 f"# {title}\n\n"
@@ -655,6 +696,7 @@ def make_chunks(
                     priority=priority,
                     group=group,
                     chapter=chapter,
+                    chapters=list(chapters),
                     locator=locator,
                     text=piece,
                     chunk_path=chunk_path.as_posix(),
@@ -677,6 +719,7 @@ def write_document_markdown(
     priority: int,
     group: str,
     chapter: Optional[int],
+    chapters: list[int],
     body: str,
 ) -> None:
     front = (
@@ -688,6 +731,7 @@ def write_document_markdown(
         f"priority: {priority}\n"
         f"group: {yaml_escape(group)}\n"
         f"chapter: {json.dumps(chapter)}\n"
+        f"chapters: {json.dumps(chapters)}\n"
         "---\n\n"
     )
     write_text(output_path, front + f"# {title}\n\n" + body)
@@ -728,6 +772,7 @@ class CoursePreparer:
         self.docs_dir = output_root / "documents"
         self.chunks_dir = output_root / "chunks"
         self.meta_dir = output_root / "meta"
+        self.sources_dir = output_root / "sources"
 
         self.records: list[DocumentRecord] = []
         self.chunks: list[ChunkRecord] = []
@@ -735,13 +780,37 @@ class CoursePreparer:
         self.reference_paths: list[dict] = []
         self.transcription_queue: list[dict] = []
         self.errors: list[dict] = []
+        self.visual_sources: list[dict] = []
         self.seen_content_hashes: dict[str, str] = {}
         self.whisper_model_cache: dict = {}
 
         self.course_name = source_root.name
 
     def register_record(self, record: DocumentRecord) -> None:
+        if not record.chapters:
+            record.chapters = chapter_numbers_from_group(record.group, record.chapter)
+        if not record.order:
+            record.order = source_order_hint(record.source_path)
         self.records.append(record)
+
+    def retain_visual_source(self, path: Path, source_id: str, source_type: str) -> Optional[str]:
+        """Keep original lecturer visuals available without treating text as visual truth."""
+        if source_type not in {"lecture_pdf", "slide"}:
+            return None
+        destination = self.sources_dir / f"{source_id}__{safe_name(path.name, 150)}"
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, destination)
+        copied_path = rel(destination, self.output_root)
+        self.visual_sources.append(
+            {
+                "source_id": source_id,
+                "source_path": rel(path, self.source_root),
+                "copied_path": copied_path,
+                "source_type": source_type,
+                "note": "Original lecturer source retained for diagrams and layout-dependent meaning.",
+            }
+        )
+        return copied_path
 
     def is_duplicate_text(self, text: str, source_path: str) -> Optional[str]:
         normalized = normalized_for_compare(text)
@@ -770,6 +839,7 @@ class CoursePreparer:
         source_path = rel(path, self.source_root)
         title = infer_title(path)
         group, chapter = classify_group(path)
+        chapters = chapter_numbers_from_group(group, chapter)
         priority = SOURCE_PRIORITY.get(source_type, 5)
         source_id = source_id_for(path, self.source_root, source_type)
 
@@ -821,6 +891,7 @@ class CoursePreparer:
             priority,
             group,
             chapter,
+            chapters,
             body,
         )
 
@@ -832,6 +903,7 @@ class CoursePreparer:
             priority=priority,
             group=group,
             chapter=chapter,
+            chapters=chapters,
             units=units or [],
             fallback_text=body,
             chunk_dir=self.chunks_dir,
@@ -855,6 +927,8 @@ class CoursePreparer:
                 words=word_count(body),
                 units=len(units or []),
                 note=note,
+                chapters=chapters,
+                source_copy_path=self.retain_visual_source(path, source_id, source_type),
             )
         )
 
@@ -956,12 +1030,29 @@ class CoursePreparer:
 
     def process_media(self, path: Path) -> None:
         if not self.args.transcribe:
+            group, chapter = classify_group(path)
+            source_path = rel(path, self.source_root)
+            source_id = source_id_for(path, self.source_root, "media")
             self.transcription_queue.append(
                 {
                     "title": infer_title(path),
-                    "source_path": rel(path, self.source_root),
+                    "source_path": source_path,
                     "size_mb": round(path.stat().st_size / (1024 * 1024), 2),
                 }
+            )
+            self.register_record(
+                DocumentRecord(
+                    source_id=source_id,
+                    title=infer_title(path),
+                    source_path=source_path,
+                    source_type="media",
+                    priority=3,
+                    group=group,
+                    chapter=chapter,
+                    output_path=None,
+                    status="media_pending",
+                    note="Media was not transcribed; see transcription_queue.md",
+                )
             )
             return
 
@@ -976,17 +1067,35 @@ class CoursePreparer:
         self.add_text_document(path, "video_transcript", body, units)
 
     def process_url(self, path: Path) -> None:
+        group, chapter = classify_group(path)
+        source_path = rel(path, self.source_root)
+        target = parse_internet_shortcut(path)
         self.links.append(
             {
                 "title": infer_title(path),
-                "source_path": rel(path, self.source_root),
-                "url": parse_internet_shortcut(path),
-                "group": classify_group(path)[0],
+                "source_path": source_path,
+                "url": target,
+                "group": group,
             }
+        )
+        self.register_record(
+            DocumentRecord(
+                source_id=source_id_for(path, self.source_root, "url"),
+                title=infer_title(path),
+                source_path=source_path,
+                source_type="url",
+                priority=5,
+                group=group,
+                chapter=chapter,
+                output_path=None,
+                status="link_only",
+                note=f"Unresolved external content: {target or 'URL not parsed'}",
+            )
         )
 
     def process_json_metadata(self, path: Path) -> None:
         if path.name not in {"_course_structure.json", "_stats.json", "_download_manifest.json"}:
+            self.process_unhandled(path)
             return
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
@@ -995,6 +1104,38 @@ class CoursePreparer:
         out = self.meta_dir / "raw_downloader_metadata" / safe_name(path.name)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        group, chapter = classify_group(path)
+        self.register_record(
+            DocumentRecord(
+                source_id=source_id_for(path, self.source_root, "metadata"),
+                title=infer_title(path),
+                source_path=rel(path, self.source_root),
+                source_type="metadata",
+                priority=5,
+                group=group,
+                chapter=chapter,
+                output_path=rel(out, self.output_root),
+                status="metadata_copied",
+                note="Downloader metadata retained for traceability, not teaching content.",
+            )
+        )
+
+    def process_unhandled(self, path: Path) -> None:
+        group, chapter = classify_group(path)
+        self.register_record(
+            DocumentRecord(
+                source_id=source_id_for(path, self.source_root, "binary"),
+                title=infer_title(path),
+                source_path=rel(path, self.source_root),
+                source_type="binary",
+                priority=5,
+                group=group,
+                chapter=chapter,
+                output_path=None,
+                status="skipped_unsupported",
+                note=f"Unsupported source type: {path.suffix.lower() or 'no extension'}",
+            )
+        )
 
     def process(self) -> None:
         files = iter_source_files(self.source_root)
@@ -1051,8 +1192,7 @@ class CoursePreparer:
                 elif ext in URL_EXTS:
                     self.process_url(path)
                 else:
-                    # assets images, binaries, etc. remain raw; not feed as text.
-                    pass
+                    self.process_unhandled(path)
             except Exception as exc:
                 print(f"        [WARN] {exc}")
                 self.errors.append({"source_path": source_path, "error": str(exc)})
@@ -1081,6 +1221,7 @@ class CoursePreparer:
         self.write_ai_tutor_context()
         print("[6/6] Sinh reports phụ...")
         self.write_reports()
+        self.write_study_pack_outputs()
 
     def write_manifests(self) -> None:
         self.meta_dir.mkdir(parents=True, exist_ok=True)
@@ -1109,7 +1250,8 @@ class CoursePreparer:
 
         stats = {
             "course_name": self.course_name,
-            "source_root": str(self.source_root),
+            "source_root": ".",
+            "source_paths_relative": True,
             "generated_at": datetime.now().isoformat(timespec="seconds"),
             "documents_total": len(self.records),
             "documents_ready": sum(r.status == "ready" for r in self.records),
@@ -1121,6 +1263,7 @@ class CoursePreparer:
             "errors": len(self.errors),
             "source_types": dict(Counter(r.source_type for r in self.records)),
             "statuses": dict(Counter(r.status for r in self.records)),
+            "chapter_groups": sorted({r.group for r in self.records if r.group.startswith("chapter_")}),
         }
         (self.meta_dir / "stats.json").write_text(
             json.dumps(stats, ensure_ascii=False, indent=2),
@@ -1174,8 +1317,16 @@ class CoursePreparer:
         write_text(self.output_root / "course_index.md", "\n".join(lines))
 
     def write_ai_tutor_context(self) -> None:
-        chapter_nums = sorted({r.chapter for r in self.records if r.chapter is not None})
-        chapter_text = ", ".join(str(n) for n in chapter_nums) if chapter_nums else "not detected"
+        chapter_sets = sorted(
+            {tuple(record.chapters) for record in self.records if record.chapters},
+            key=lambda values: values,
+        )
+        chapter_text = ", ".join(
+            str(values[0]) if len(values) == 1 else "–".join(map(str, values))
+            for values in chapter_sets
+        ) or "not detected"
+        detected = {chapter for values in chapter_sets for chapter in values}
+        gaps = [chapter for chapter in range(min(detected), max(detected) + 1) if chapter not in detected] if detected else []
 
         text = f"""# AI Tutor Context — {self.course_name}
 
@@ -1206,8 +1357,9 @@ When multiple sources overlap or disagree, prefer them in this order:
 ## Course organization detected
 
 Detected chapters: **{chapter_text}**.
+{f"Potential source gaps: Chapter {', '.join(map(str, gaps))} was not found in downloaded material." if gaps else "No chapter gap can be inferred from detected source numbering."}
 
-Use `course_index.md` to navigate human-readable sources and `meta/corpus.jsonl` for chunk-level retrieval/embeddings.
+Read `START_HERE.md`, `COURSE_MAP.md`, `COVERAGE_REPORT.md`, and `TUTOR_PROTOCOL.md` before teaching. Use `chapters/` as long-form evidence and `meta/corpus.jsonl` for chunk-level retrieval/embeddings.
 
 ## Recommended retrieval strategy
 
@@ -1297,6 +1449,30 @@ For a question about Chapter N:
             for e in self.errors:
                 lines.append(f"- `{e['source_path']}` — {e['error']}")
         write_text(self.output_root / "processing_report.md", "\n".join(lines))
+
+    def write_study_pack_outputs(self) -> None:
+        self.meta_dir.mkdir(parents=True, exist_ok=True)
+        (self.meta_dir / "visual_manifest.json").write_text(
+            json.dumps(self.visual_sources, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        records = [asdict(record) for record in self.records]
+        write_study_navigation(self.output_root, self.course_name, records)
+        validation = validate_ai_study_pack(self.output_root)
+        lines = ["# AI Study Pack Quality Report", "", "## Structural errors", ""]
+        if validation.errors:
+            lines.extend(f"- {error}" for error in validation.errors)
+        else:
+            lines.append("- None")
+        lines.extend(("", "## Warnings", ""))
+        if validation.warnings:
+            lines.extend(f"- {warning}" for warning in validation.warnings)
+        else:
+            lines.append("- None")
+        write_text(self.output_root / "QUALITY_REPORT.md", "\n".join(lines))
+        if validation.errors:
+            raise RuntimeError("AI Study Pack validation failed: " + "; ".join(validation.errors))
+        self.study_pack_path = create_chatgpt_study_pack(self.output_root, self.course_name)
 
 
 # -----------------------------------------------------------------------------

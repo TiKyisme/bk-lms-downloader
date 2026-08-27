@@ -49,7 +49,7 @@ jobs:
             --add-data "tools/prepare_ai_course.py;tools" `
             "app.py"
 
-      - name: Smoke test packaged AI runtime
+      - name: Validate packaged AI Study Pack runtime
         shell: pwsh
         run: |
           $selfTest = Start-Process `
@@ -62,7 +62,7 @@ jobs:
             if (Test-Path "ai-self-test-error.log") {
               Get-Content "ai-self-test-error.log"
             }
-            throw "Packaged AI runtime smoke failed."
+            throw "Packaged AI Study Pack validation failed."
           }
 
       - name: Upload build artifact

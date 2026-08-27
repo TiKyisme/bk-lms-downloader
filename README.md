@@ -17,6 +17,9 @@ No Python or Git setup is needed for the normal GUI experience.
    your enrolled-course list.
 4. Choose courses and click **Sync all** (or **Sync selected**).
 5. Run **Sync all** again later; existing unchanged files are skipped.
+6. To study with ChatGPT: tick one or more synced courses, choose **Công cụ →
+   Chuẩn bị đã chọn cho AI**, then upload the generated **AI Study Pack.zip** to
+   ChatGPT and paste `CHATGPT_START_PROMPT.txt` from the pack.
 
 The app remembers both your course list and last output folder. You can remove
 checked courses or all courses from the app list; this never deletes downloaded
@@ -89,9 +92,11 @@ There is no Complete Archive mode, no `COURSE_*` output tree, no
 ## Optional AI preparation
 
 For downloaded courses, choose **Công cụ → Chuẩn bị đã chọn cho AI** or
-**Chuẩn bị tất cả cho AI**. Each course gets its own local `AI_Knowledge/`
-folder containing source-aware Markdown, documents, chunks, and metadata. The
-Windows release includes this local preparation feature; it does not add AI
+**Chuẩn bị tất cả cho AI**. Each course gets its own local `AI_Knowledge/` and
+an adjacent **AI Study Pack.zip** ready for ChatGPT upload. The pack starts with
+`START_HERE.md`, `COURSE_MAP.md`, `COVERAGE_REPORT.md`, and a copyable starter
+prompt; it also retains original lecture visual sources when diagrams matter.
+The Windows release includes this local preparation feature; it does not add AI
 chat, cloud accounts, API keys, video transcription, or CUDA requirements.
 
 See [tools/README_prepare_ai_course.md](tools/README_prepare_ai_course.md) for
