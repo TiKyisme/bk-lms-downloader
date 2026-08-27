@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import importlib
 import importlib.util
 import io
 import sys
+import tempfile
+import traceback
 from contextlib import redirect_stdout
 from dataclasses import dataclass
 from pathlib import Path
@@ -49,6 +52,63 @@ def default_ai_tool_path() -> Path:
     else:
         root = Path(__file__).resolve().parents[2]
     return root / AI_TOOL_RELATIVE_PATH
+
+
+def _ai_runtime_self_test() -> None:
+    """Exercise every packaged AI reader and resource without opening the GUI."""
+    missing = missing_ai_dependencies()
+    if missing:
+        raise RuntimeError("Missing packaged AI modules: " + ", ".join(missing))
+    for module_name in REQUIRED_AI_MODULES.values():
+        importlib.import_module(module_name)
+    if not default_ai_tool_path().is_file():
+        raise RuntimeError("Bundled AI preparation tool is missing")
+
+    with tempfile.TemporaryDirectory(prefix="bklms_ai_smoke_") as temp_dir:
+        course_root = Path(temp_dir) / "Course"
+        course_root.mkdir()
+        (course_root / "notes.txt").write_text("AI runtime smoke", encoding="utf-8")
+
+        html_dir = course_root / "Web Page"
+        html_dir.mkdir()
+        (html_dir / "content.html").write_text(
+            "<h1>Packaged HTML smoke</h1><p>Local extraction.</p>",
+            encoding="utf-8",
+        )
+
+        from pypdf import PdfWriter
+
+        pdf_writer = PdfWriter()
+        pdf_writer.add_blank_page(width=72, height=72)
+        with (course_root / "tiny.pdf").open("wb") as pdf_handle:
+            pdf_writer.write(pdf_handle)
+
+        from pptx import Presentation
+
+        presentation = Presentation()
+        slide = presentation.slides.add_slide(presentation.slide_layouts[1])
+        slide.shapes.title.text = "Packaged PPTX smoke"
+        presentation.save(course_root / "tiny.pptx")
+
+        output = AICoursePreparer().prepare(course_root)
+        required_outputs = (
+            output / "AI_TUTOR_CONTEXT.md",
+            output / "course_index.md",
+            output / "processing_report.md",
+            output / "meta" / "corpus.jsonl",
+        )
+        if not all(path.is_file() for path in required_outputs):
+            raise RuntimeError("AI runtime self-test did not create required outputs")
+
+
+def run_ai_runtime_self_test() -> int:
+    """Return a process exit code and persist diagnostics for windowed builds."""
+    try:
+        _ai_runtime_self_test()
+    except Exception:
+        Path("ai-self-test-error.log").write_text(traceback.format_exc(), encoding="utf-8")
+        return 1
+    return 0
 
 
 def _load_ai_pipeline(script_path: Path) -> ModuleType:

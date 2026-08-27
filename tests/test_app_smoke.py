@@ -1,12 +1,12 @@
 from pathlib import Path
 
-import app
+import bklms_downloader.ai_prepare as ai_prepare
 
 
 def test_ai_runtime_smoke_returns_success(monkeypatch):
-    monkeypatch.setattr(app, "_ai_runtime_smoke", lambda: None)
+    monkeypatch.setattr(ai_prepare, "_ai_runtime_self_test", lambda: None)
 
-    assert app._run_ai_runtime_smoke() == 0
+    assert ai_prepare.run_ai_runtime_self_test() == 0
 
 
 def test_ai_runtime_smoke_persists_failure_diagnostics(monkeypatch, tmp_path: Path):
@@ -14,8 +14,8 @@ def test_ai_runtime_smoke_persists_failure_diagnostics(monkeypatch, tmp_path: Pa
         raise ModuleNotFoundError("missing packaged reader")
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(app, "_ai_runtime_smoke", fail)
+    monkeypatch.setattr(ai_prepare, "_ai_runtime_self_test", fail)
 
-    assert app._run_ai_runtime_smoke() == 1
+    assert ai_prepare.run_ai_runtime_self_test() == 1
     diagnostics = (tmp_path / "ai-self-test-error.log").read_text(encoding="utf-8")
     assert "ModuleNotFoundError: missing packaged reader" in diagnostics
