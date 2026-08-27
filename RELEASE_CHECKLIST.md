@@ -1,4 +1,4 @@
-# BK-LMS Downloader v1.0.5 release checklist
+# BK-LMS Downloader v1.0.6 release checklist
 
 Complete this manual checklist before creating the public tag.
 
@@ -27,6 +27,7 @@ Complete this manual checklist before creating the public tag.
 - [ ] Original downloaded files remain untouched by AI preparation.
 - [ ] Packaged EXE requires no Python or pip installation for AI preparation.
 - [ ] Packaged `BK-LMS-Downloader.exe --self-test-ai` exits successfully.
+- [ ] Packaged `BK-LMS-Downloader.exe --diagnose-ai` reports all AI imports and synthetic batch success.
 - [ ] No credentials, cookies, or session material are present in repository files or logs.
 - [ ] README screenshot and download instructions are current.
-- [ ] Create `v1.0.5` only after all above smoke tests pass.
+- [ ] Create `v1.0.6` only after all above smoke tests pass.

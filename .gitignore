@@ -18,6 +18,7 @@ dist/
 *.spec
 /BK-LMS-Downloader.exe
 /ai-self-test-error.log
+/ai-self-test-diagnostics.log
 
 # IDE / OS
 .vscode/

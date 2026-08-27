@@ -35,10 +35,20 @@ class AIPreparationError(RuntimeError):
 
 
 def missing_ai_dependencies(
-    finder: Callable[[str], object | None] = importlib.util.find_spec,
+    importer: Callable[[str], object] = importlib.import_module,
 ) -> list[str]:
-    """Return required local-preprocessing modules missing from this runtime."""
-    return [package for package, module in REQUIRED_AI_MODULES.items() if finder(module) is None]
+    """Return modules that cannot actually import in this runtime.
+
+    ``find_spec`` is deliberately not used here: a frozen PyInstaller process
+    can import a bundled module even when metadata/spec probing is inconsistent.
+    """
+    missing: list[str] = []
+    for package, module in REQUIRED_AI_MODULES.items():
+        try:
+            importer(module)
+        except ImportError:
+            missing.append(package)
+    return missing
 
 
 def default_ai_output(course_root: Path) -> Path:
@@ -54,13 +64,35 @@ def default_ai_tool_path() -> Path:
     return root / AI_TOOL_RELATIVE_PATH
 
 
-def _ai_runtime_self_test() -> None:
-    """Exercise every packaged AI reader and resource without opening the GUI."""
+def ai_runtime_diagnostics() -> str:
+    """Collect import facts for support without using metadata to gate runtime."""
+    lines = [
+        f"Frozen: {'yes' if getattr(sys, 'frozen', False) else 'no'}",
+        f"sys._MEIPASS: {getattr(sys, '_MEIPASS', None)!r}",
+        f"sys.executable: {sys.executable}",
+        f"AI tool: {default_ai_tool_path()} ({'OK' if default_ai_tool_path().is_file() else 'MISSING'})",
+    ]
+    for package, module_name in REQUIRED_AI_MODULES.items():
+        try:
+            module = importlib.import_module(module_name)
+        except Exception as exc:
+            lines.append(f"{package} ({module_name}): IMPORT FAILED: {type(exc).__name__}: {exc}")
+            continue
+        lines.extend(
+            (
+                f"{package} ({module_name}): IMPORT OK",
+                f"  __file__: {getattr(module, '__file__', None)!r}",
+                f"  __spec__: {getattr(module, '__spec__', None)!r}",
+            )
+        )
+    return "\n".join(lines)
+
+
+def _ai_runtime_self_test() -> Path:
+    """Exercise the same batch path used by the end-user GUI."""
     missing = missing_ai_dependencies()
     if missing:
         raise RuntimeError("Missing packaged AI modules: " + ", ".join(missing))
-    for module_name in REQUIRED_AI_MODULES.values():
-        importlib.import_module(module_name)
     if not default_ai_tool_path().is_file():
         raise RuntimeError("Bundled AI preparation tool is missing")
 
@@ -90,7 +122,22 @@ def _ai_runtime_self_test() -> None:
         slide.shapes.title.text = "Packaged PPTX smoke"
         presentation.save(course_root / "tiny.pptx")
 
-        output = AICoursePreparer().prepare(course_root)
+        course = Course(
+            id="ai-self-test",
+            url="https://lms.hcmut.edu.vn/course/view.php?id=1",
+            output=str(course_root),
+            name="AI runtime self-test",
+        )
+        batch = AIBatchPreparer().prepare_courses(
+            [course],
+            lambda item: item.output_path,
+        )
+        if len(batch.succeeded) != 1 or batch.failed:
+            detail = batch.failed[0].error if batch.failed else "unknown batch failure"
+            raise RuntimeError("AI batch self-test failed: " + (detail or "unknown error"))
+        output = batch.succeeded[0].output
+        if output is None:
+            raise RuntimeError("AI batch self-test returned no output")
         required_outputs = (
             output / "AI_TUTOR_CONTEXT.md",
             output / "course_index.md",
@@ -99,15 +146,43 @@ def _ai_runtime_self_test() -> None:
         )
         if not all(path.is_file() for path in required_outputs):
             raise RuntimeError("AI runtime self-test did not create required outputs")
+        return output
 
 
 def run_ai_runtime_self_test() -> int:
     """Return a process exit code and persist diagnostics for windowed builds."""
     try:
-        _ai_runtime_self_test()
+        output = _ai_runtime_self_test()
     except Exception:
-        Path("ai-self-test-error.log").write_text(traceback.format_exc(), encoding="utf-8")
+        Path("ai-self-test-error.log").write_text(
+            ai_runtime_diagnostics() + "\n\n" + traceback.format_exc(),
+            encoding="utf-8",
+        )
         return 1
+    Path("ai-self-test-diagnostics.log").write_text(
+        ai_runtime_diagnostics() + f"\nSynthetic batch: OK\nAI_Knowledge: {output}\n",
+        encoding="utf-8",
+    )
+    return 0
+
+
+def run_ai_runtime_diagnostics() -> int:
+    """Write and print a concise report while exercising the full batch path."""
+    report = ai_runtime_diagnostics()
+    try:
+        output = _ai_runtime_self_test()
+    except Exception:
+        Path("ai-self-test-error.log").write_text(
+            report + "\n\n" + traceback.format_exc(),
+            encoding="utf-8",
+        )
+        return 1
+    report += f"\nSynthetic batch: OK\nAI_Knowledge: {output}"
+    Path("ai-self-test-diagnostics.log").write_text(report + "\n", encoding="utf-8")
+    try:
+        print(report)
+    except (AttributeError, OSError, UnicodeError):
+        pass
     return 0
 
 
@@ -135,16 +210,16 @@ class AICoursePreparer:
         self,
         *,
         script_path: Path | None = None,
-        dependency_finder: Callable[[str], object | None] = importlib.util.find_spec,
+        dependency_importer: Callable[[str], object] = importlib.import_module,
         pipeline_loader: Callable[[Path], ModuleType] = _load_ai_pipeline,
     ):
         self.script_path = script_path or default_ai_tool_path()
-        self.dependency_finder = dependency_finder
+        self.dependency_importer = dependency_importer
         self.pipeline_loader = pipeline_loader
         self._pipeline: ModuleType | None = None
 
     def prepare(self, course_root: Path, output: Path | None = None) -> Path:
-        missing = missing_ai_dependencies(self.dependency_finder)
+        missing = missing_ai_dependencies(self.dependency_importer)
         if missing:
             raise OptionalAIDependenciesError(
                 "Thiếu thành phần AI cần thiết: " + ", ".join(missing) + "."

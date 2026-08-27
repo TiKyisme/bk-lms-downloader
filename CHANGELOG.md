@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.6 - 2026-08-27
+
+- Fix frozen-Windows false "pypdf missing" failures by validating AI readers
+  through actual imports instead of `find_spec` metadata probing.
+- Make packaged AI self-tests exercise the production batch path and add
+  `--diagnose-ai` reports for end-user runtime troubleshooting.
+
 ## 1.0.5 - 2026-08-27
 
 - Make the release gate wait for the windowed packaged AI self-test process and

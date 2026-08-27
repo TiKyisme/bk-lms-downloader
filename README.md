@@ -64,6 +64,10 @@ account has write permission.
 the app activity log. The Windows release already includes the local AI
 preparation components; no Python, pip, or API key is required.
 
+For support diagnostics, run `BK-LMS-Downloader.exe --diagnose-ai`; it verifies
+the same synthetic batch path and writes `ai-self-test-diagnostics.log` beside
+the command's working directory.
+
 ## Output layout
 
 The crawler may follow Moodle material deeply, but saved files remain compact:

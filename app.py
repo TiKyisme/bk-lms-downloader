@@ -13,5 +13,9 @@ if __name__ == "__main__":
         from bklms_downloader.ai_prepare import run_ai_runtime_self_test
 
         raise SystemExit(run_ai_runtime_self_test())
+    if "--diagnose-ai" in sys.argv:
+        from bklms_downloader.ai_prepare import run_ai_runtime_diagnostics
+
+        raise SystemExit(run_ai_runtime_diagnostics())
     else:
         main()

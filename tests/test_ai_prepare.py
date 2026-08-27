@@ -11,6 +11,7 @@ from bklms_downloader.ai_prepare import (
     AICoursePreparer,
     AIPreparationError,
     REQUIRED_AI_MODULES,
+    ai_runtime_diagnostics,
     default_ai_output,
     default_ai_tool_path,
     missing_ai_dependencies,
@@ -29,10 +30,21 @@ def make_course(tmp_path: Path, number: int, *, selected: bool = True) -> Course
     )
 
 
-def test_missing_runtime_dependencies_are_reported_without_importing_them():
-    missing = missing_ai_dependencies(lambda module: None if module == "pypdf" else object())
+def test_missing_runtime_dependencies_are_reported_from_actual_import_failures():
+    def importer(module: str):
+        if module == "pypdf":
+            raise ModuleNotFoundError(module)
+        return object()
 
+    missing = missing_ai_dependencies(importer)
     assert missing == ["pypdf"]
+
+
+def test_importable_dependency_is_not_rejected_when_spec_metadata_would_be_missing(monkeypatch):
+    # This mirrors a PyInstaller runtime where metadata probing is unreliable
+    # but importing the bundled module works normally.
+    monkeypatch.setattr(importlib.util, "find_spec", lambda _module: None)
+    assert missing_ai_dependencies(lambda _module: object()) == []
 
 
 def test_required_runtime_ai_modules_are_importable():
@@ -52,7 +64,7 @@ def test_existing_ai_knowledge_is_rebuilt_in_process_with_force(tmp_path: Path):
     pipeline = SimpleNamespace(run_preparation=lambda args: calls.append(args))
     preparer = AICoursePreparer(
         script_path=script,
-        dependency_finder=lambda _module: object(),
+        dependency_importer=lambda _module: object(),
         pipeline_loader=lambda _path: pipeline,
     )
 
@@ -72,7 +84,7 @@ def test_preparer_protects_the_course_root_from_an_arbitrary_output_path(tmp_pat
     source_file.write_text("source", encoding="utf-8")
     preparer = AICoursePreparer(
         script_path=tmp_path / "missing.py",
-        dependency_finder=lambda _module: object(),
+        dependency_importer=lambda _module: object(),
     )
 
     with pytest.raises(AIPreparationError, match="AI_Knowledge"):
@@ -118,6 +130,36 @@ def test_real_local_pipeline_creates_ai_knowledge_without_changing_source_files(
     assert (output / "AI_TUTOR_CONTEXT.md").is_file()
     assert (output / "meta" / "corpus.jsonl").is_file()
     assert source_file.read_text(encoding="utf-8") == "Bài giảng cơ sở dữ liệu"
+
+
+def test_real_batch_path_creates_ai_knowledge_from_a_tiny_pdf(tmp_path: Path):
+    from pypdf import PdfWriter
+
+    course = make_course(tmp_path, 2013)
+    course_root = Path(course.output)
+    course_root.mkdir()
+    (course_root / "notes.txt").write_text("Batch AI test", encoding="utf-8")
+    writer = PdfWriter()
+    writer.add_blank_page(width=72, height=72)
+    with (course_root / "tiny.pdf").open("wb") as pdf_handle:
+        writer.write(pdf_handle)
+
+    batch = AIBatchPreparer().prepare_courses([course], lambda item: item.output_path)
+
+    assert len(batch.succeeded) == 1
+    assert batch.failed == []
+    output = batch.succeeded[0].output
+    assert output is not None
+    assert (output / "AI_TUTOR_CONTEXT.md").is_file()
+
+
+def test_runtime_diagnostics_report_actual_import_information():
+    report = ai_runtime_diagnostics()
+
+    assert "Frozen:" in report
+    assert "pypdf (pypdf): IMPORT OK" in report
+    assert "__file__:" in report
+    assert "__spec__:" in report
 
 
 class FakePreparer:
