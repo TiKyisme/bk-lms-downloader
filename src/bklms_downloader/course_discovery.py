@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass
 from typing import Iterable
@@ -13,6 +14,12 @@ from .utils import clean_text, extract_course_code, is_course_url, normalized_co
 
 
 MY_COURSES_PATH = "/my/courses.php"
+COURSE_STARRED_ACCESSIBILITY_TEXT = "Khóa học được đánh dấu sao"
+COURSE_NAME_ACCESSIBILITY_TEXT = "Tên khóa học"
+_COURSE_ACCESSIBILITY_PREFIX_RE = re.compile(
+    rf"^(?:(?:{re.escape(COURSE_STARRED_ACCESSIBILITY_TEXT)}|"
+    rf"{re.escape(COURSE_NAME_ACCESSIBILITY_TEXT)})\s*)+"
+)
 _BROWSER_RENDER_TIMEOUT = 8.0
 _BROWSER_COURSE_SELECTORS = (
     "a[href*='/course/view.php?id=']",
@@ -50,6 +57,12 @@ class SessionExpiredError(CourseDiscoveryError):
     pass
 
 
+def clean_course_name(value: str) -> str:
+    """Remove repeated Moodle accessibility labels only when used as prefixes."""
+    normalized = clean_text(value or "")
+    return clean_text(_COURSE_ACCESSIBILITY_PREFIX_RE.sub("", normalized))
+
+
 def parse_discovered_courses(html: str, base_url: str = LMS_BASE) -> list[DiscoveredCourse]:
     """Extract course cards from the enrolled-course page, never navigation links."""
     soup = BeautifulSoup(html or "", "html.parser")
@@ -63,7 +76,7 @@ def parse_discovered_courses(html: str, base_url: str = LMS_BASE) -> list[Discov
         normalized_url = normalized_course_url(url)
         if normalized_url in discovered:
             continue
-        name = _course_name(anchor)
+        name = clean_course_name(_course_name(anchor))
         if not name:
             continue
         course_id = parse_qs(urlparse(normalized_url).query).get("id", [""])[0]
@@ -357,7 +370,7 @@ def _courses_from_browser_anchors(driver, page_url: str) -> list[DiscoveredCours
             normalized_url = normalized_course_url(url)
             if normalized_url in discovered:
                 continue
-            name = clean_text(anchor.text or anchor.get_attribute("textContent") or "")
+            name = clean_course_name(anchor.text or anchor.get_attribute("textContent") or "")
             if not name:
                 continue
             course_id = parse_qs(urlparse(normalized_url).query).get("id", [""])[0]

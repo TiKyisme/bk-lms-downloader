@@ -19,7 +19,7 @@ ChatGPT / RAG / AI Tutor
 PowerShell:
 
 ```powershell
-pip install beautifulsoup4 markdownify pymupdf python-pptx
+pip install beautifulsoup4 markdownify pypdf python-pptx
 ```
 
 Nếu muốn transcript video:

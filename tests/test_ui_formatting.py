@@ -1,5 +1,5 @@
 from bklms_downloader.gui import App
-from bklms_downloader.models import Course
+from bklms_downloader.models import Course, checked_courses
 from bklms_downloader.ui_theme import THEME
 
 
@@ -28,3 +28,16 @@ def test_course_status_error_and_last_sync_formatting_are_human_friendly():
     assert App._status_text(course) == ("2 lỗi", THEME.danger)
     assert App._format_last_sync(None) == "Chưa đồng bộ"
     assert App._format_last_sync("2026-08-26T13:20:00+07:00") == "26/08 13:20"
+
+
+def test_checked_courses_is_shared_source_of_truth_for_batch_actions():
+    checked = Course("1", "https://lms.hcmut.edu.vn/course/view.php?id=1", "out")
+    unchecked = Course(
+        "2",
+        "https://lms.hcmut.edu.vn/course/view.php?id=2",
+        "out",
+        selected=False,
+    )
+
+    assert checked_courses([checked, unchecked]) == [checked]
+    assert checked_courses([unchecked]) == []

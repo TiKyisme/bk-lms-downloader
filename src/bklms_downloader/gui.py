@@ -14,7 +14,7 @@ from typing import Callable
 import customtkinter as ctk
 
 from . import __version__
-from .ai_prepare import AICoursePreparer, OptionalAIDependenciesError, default_ai_output
+from .ai_prepare import AIBatchPreparer, AIBatchPreparationResult
 from .app_logging import get_logger
 from .app_settings import AppSettings
 from .auth import create_driver, make_session, wait_page
@@ -26,7 +26,7 @@ from .course_discovery import (
     discover_courses_with_browser_fallback,
 )
 from .course_store import CourseStore
-from .models import Course, SyncBatchResult
+from .models import Course, SyncBatchResult, checked_courses
 from .sync_manager import SyncManager
 from .ui_icons import icon
 from .ui_theme import THEME
@@ -425,6 +425,92 @@ class DeleteConfirmationDialog(ctk.CTkToplevel):
             width=126,
             fg_color=THEME.danger,
             hover_color="#BE2C3A",
+            corner_radius=9,
+        ).pack(side="right", padx=(0, 8))
+
+    def _confirm(self) -> None:
+        self.on_confirm()
+        self.destroy()
+
+
+class AIBatchConfirmationDialog(ctk.CTkToplevel):
+    """Confirm one sequential AI batch without prompting once per course."""
+
+    def __init__(self, parent: "App", courses: list[Course], on_confirm: Callable[[], None]):
+        super().__init__(parent)
+        self.on_confirm = on_confirm
+        self.title(f"Chuẩn bị {len(courses)} course cho AI?")
+        self.geometry("610x390")
+        self.minsize(510, 300)
+        self.configure(fg_color=THEME.bg)
+        self.transient(parent)
+        self.grab_set()
+
+        preview = [f"- {course.code or '-'} — {course.display_name}" for course in courses[:5]]
+        remaining = len(courses) - len(preview)
+        if remaining:
+            preview.append(f"... và {remaining} course khác")
+        existing = sum((parent._course_root(course) / "AI_Knowledge").exists() for course in courses)
+        existing_notice = (
+            f"\n\n{existing}/{len(courses)} course đã có AI_Knowledge và sẽ được tạo lại."
+            if existing
+            else ""
+        )
+        message = (
+            "\n".join(preview)
+            + "\n\nKnowledge base của từng course sẽ được tạo/cập nhật riêng."
+            + existing_notice
+            + "\n\nQuá trình có thể mất vài phút."
+        )
+
+        card = ctk.CTkFrame(
+            self,
+            fg_color=THEME.surface,
+            border_color=THEME.border,
+            border_width=1,
+            corner_radius=THEME.radius,
+        )
+        card.pack(fill="both", expand=True, padx=18, pady=18)
+        card.grid_columnconfigure(0, weight=1)
+        card.grid_rowconfigure(1, weight=1)
+        ctk.CTkLabel(
+            card,
+            text=self.title(),
+            font=(THEME.font_family, 18, "bold"),
+            text_color=THEME.text,
+        ).grid(row=0, column=0, sticky="w", padx=20, pady=(20, 8))
+        ctk.CTkLabel(
+            card,
+            text=message,
+            justify="left",
+            anchor="nw",
+            wraplength=550,
+            font=(THEME.font_family, 13),
+            text_color=THEME.text,
+        ).grid(row=1, column=0, sticky="nsew", padx=20, pady=(0, 14))
+        actions = ctk.CTkFrame(card, fg_color="transparent")
+        actions.grid(row=2, column=0, sticky="e", padx=20, pady=(0, 20))
+        ctk.CTkButton(
+            actions,
+            text="Hủy",
+            command=self.destroy,
+            height=38,
+            width=96,
+            fg_color=THEME.surface,
+            hover_color=THEME.inset,
+            text_color=THEME.text,
+            border_color=THEME.border,
+            border_width=1,
+            corner_radius=9,
+        ).pack(side="right")
+        ctk.CTkButton(
+            actions,
+            text="Bắt đầu",
+            command=self._confirm,
+            height=38,
+            width=112,
+            fg_color=THEME.primary,
+            hover_color=THEME.primary_hover,
             corner_radius=9,
         ).pack(side="right", padx=(0, 8))
 
@@ -987,18 +1073,10 @@ class App(ctk.CTk):
     def course_exists(self, url: str) -> bool:
         return any(course.url == url for course in self.store.list())
 
-    def _delete_course(self) -> None:
-        if self.syncing:
-            return
-        course = self._selected_course()
-        if course is None:
-            return
-        self._confirm_remove_courses([course], confirm_text="Xóa")
-
     def _delete_checked_courses(self) -> None:
         if self.syncing:
             return
-        courses = [course for course in self.store.list() if course.selected]
+        courses = checked_courses(self.store.list())
         if not courses:
             messagebox.showinfo("Xóa course", "Chưa chọn course nào để xóa.", parent=self)
             return
@@ -1066,10 +1144,8 @@ class App(ctk.CTk):
         if self.syncing:
             return
         menu = tk.Menu(self, tearoff=False, font=(THEME.font_family, 10))
-        menu.add_command(label="Xóa course đang chọn", command=self._delete_course)
-        menu.add_command(label="Xóa các course đã tick", command=self._delete_checked_courses)
-        menu.add_separator()
-        menu.add_command(label="Xóa tất cả course", command=self._delete_all_courses)
+        menu.add_command(label="Xóa đã chọn", command=self._delete_checked_courses)
+        menu.add_command(label="Xóa tất cả", command=self._delete_all_courses)
         try:
             menu.tk_popup(
                 self.delete_btn.winfo_rootx(),
@@ -1099,7 +1175,14 @@ class App(ctk.CTk):
 
     def _show_tools_menu(self) -> None:
         menu = tk.Menu(self, tearoff=False, font=(THEME.font_family, 10))
-        menu.add_command(label="Chuẩn bị cho AI", command=self._prepare_for_ai)
+        menu.add_command(
+            label="Chuẩn bị đã chọn cho AI",
+            command=self._prepare_checked_courses_for_ai,
+        )
+        menu.add_command(
+            label="Chuẩn bị tất cả cho AI",
+            command=self._prepare_all_courses_for_ai,
+        )
         try:
             menu.tk_popup(self.tools_btn.winfo_rootx(), self.tools_btn.winfo_rooty() + self.tools_btn.winfo_height())
         finally:
@@ -1110,46 +1193,57 @@ class App(ctk.CTk):
         named_output = output / safe_name(course.name, 150) if course.name else output
         return named_output if named_output.exists() else output
 
-    def _prepare_for_ai(self) -> None:
+    def _prepare_checked_courses_for_ai(self) -> None:
         if self.syncing:
             return
-        course = self._selected_course()
-        if course is None:
-            return
-        course_root = self._course_root(course)
-        destination = default_ai_output(course_root)
-        if not course_root.exists():
-            messagebox.showwarning(
+        courses = checked_courses(self.store.list())
+        if not courses:
+            messagebox.showinfo(
                 "Chuẩn bị cho AI",
-                "Hãy đồng bộ course ít nhất một lần trước khi chuẩn bị cho AI.",
+                "Chưa chọn course nào để chuẩn bị cho AI.",
                 parent=self,
             )
             return
-        if not messagebox.askyesno(
-            "Chuẩn bị cho AI",
-            f"Tạo lại knowledge base tại:\n{destination}\n\n"
-            "Tính năng này là tuỳ chọn và có thể mất vài phút.",
-            parent=self,
-        ):
+        self._confirm_ai_batch(courses)
+
+    def _prepare_all_courses_for_ai(self) -> None:
+        if self.syncing:
+            return
+        courses = self.store.list()
+        if not courses:
+            messagebox.showinfo(
+                "Chuẩn bị cho AI",
+                "Danh sách course đang trống.",
+                parent=self,
+            )
+            return
+        self._confirm_ai_batch(courses)
+
+    def _confirm_ai_batch(self, courses: list[Course]) -> None:
+        AIBatchConfirmationDialog(
+            self,
+            courses,
+            on_confirm=lambda: self._start_ai_preparation(courses),
+        )
+
+    def _start_ai_preparation(self, courses: list[Course]) -> None:
+        if not courses or self.syncing:
             return
 
         self._set_busy(True)
-        self.current_course_var.set(f"Đang chuẩn bị cho AI: {course.display_name}")
+        self.progress.set(0)
+        self.overall_var.set(f"0 / {len(courses)} course")
+        self.current_course_var.set("Đang chuẩn bị cho AI...")
         self._set_summary_message("Đang xử lý tài liệu đã tải...")
+        self._log(f"[AI] Bắt đầu chuẩn bị {len(courses)} course.")
 
         def worker() -> None:
-            try:
-                output = AICoursePreparer().prepare(course_root, destination)
-                self.events.put({"event": "ai_prepare_complete", "output": output})
-            except OptionalAIDependenciesError as exc:
-                self.events.put({"event": "ai_prepare_missing", "error": str(exc)})
-            except Exception:
-                self.events.put(
-                    {
-                        "event": "ai_prepare_error",
-                        "error": "Không thể chuẩn bị course cho AI. Hãy thử lại sau.",
-                    }
-                )
+            batch = AIBatchPreparer().prepare_courses(
+                courses,
+                self._course_root,
+                self._emit_from_worker,
+            )
+            self.events.put({"event": "ai_prepare_batch_complete", "result": batch})
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -1281,7 +1375,7 @@ class App(ctk.CTk):
             return
         courses = self.store.list()
         if selected_only:
-            courses = [course for course in courses if course.selected]
+            courses = checked_courses(courses)
         if not courses:
             messagebox.showwarning(
                 "Chưa có course",
@@ -1361,21 +1455,26 @@ class App(ctk.CTk):
             if "đăng nhập" in message.lower():
                 self._set_login_status("Phiên đăng nhập hết hạn", "error")
             messagebox.showwarning("Nhập từ BK-LMS", message, parent=self)
-        elif kind == "ai_prepare_complete":
-            self._set_busy(False)
-            self.current_course_var.set("Sẵn sàng đồng bộ")
-            self._set_summary_message("Đã chuẩn bị course cho AI.")
-            messagebox.showinfo("Chuẩn bị cho AI", f"Đã tạo knowledge base tại:\n{event['output']}", parent=self)
-        elif kind == "ai_prepare_missing":
-            self._set_busy(False)
-            self.current_course_var.set("Sẵn sàng đồng bộ")
-            self._set_summary_message("Tính năng AI cần cài thêm gói tuỳ chọn.")
-            messagebox.showinfo("Chuẩn bị cho AI", event["error"], parent=self)
-        elif kind == "ai_prepare_error":
-            self._set_busy(False)
-            self.current_course_var.set("Sẵn sàng đồng bộ")
-            self._set_summary_message("Không thể chuẩn bị course cho AI.")
-            messagebox.showwarning("Chuẩn bị cho AI", event["error"], parent=self)
+        elif kind == "ai_prepare_course_start":
+            course: Course = event["course"]
+            index, total = event["index"], event["total"]
+            self.current_course_var.set(
+                f"Đang chuẩn bị cho AI: {course.code or '-'} — {course.display_name}"
+            )
+            self.overall_var.set(f"{index} / {total} course")
+            self.progress.set((index - 1) / max(1, total))
+            self._log(f"[AI] {course.code or '-'} - {course.display_name}")
+        elif kind == "ai_prepare_course_complete":
+            result = event["result"]
+            self.progress.set(event["index"] / max(1, event["total"]))
+            if result.succeeded:
+                self._log(f"[AI][DONE] {result.course.display_name}")
+            else:
+                self._log(
+                    f"[AI][ERROR] {result.course.code or '-'}: {result.error or 'Unknown error'}"
+                )
+        elif kind == "ai_prepare_batch_complete":
+            self._complete_ai_batch(event["result"])
         elif kind == "update_available":
             self.update_info = event["update"]
             self.update_notice_var.set(f"Có bản cập nhật v{self.update_info.latest_version}")
@@ -1411,6 +1510,42 @@ class App(ctk.CTk):
                 "Không thể hoàn tất đồng bộ. Hãy kiểm tra kết nối rồi thử lại.",
                 parent=self,
             )
+
+    def _complete_ai_batch(self, batch: AIBatchPreparationResult) -> None:
+        self._set_busy(False)
+        total = len(batch.results)
+        succeeded = batch.succeeded
+        failed = batch.failed
+        self.progress.set(1 if total else 0)
+        self.overall_var.set(f"{total} / {total} course")
+        self.current_course_var.set("Sẵn sàng đồng bộ")
+        self._set_summary_message(
+            f"AI: {len(succeeded)} course thành công • {len(failed)} course thất bại"
+        )
+
+        if not failed:
+            messagebox.showinfo(
+                "Chuẩn bị cho AI",
+                f"Đã chuẩn bị {len(succeeded)} course cho AI.",
+                parent=self,
+            )
+            return
+
+        preview = [
+            f"- {result.course.code or '-'} — {result.course.display_name}"
+            for result in failed[:5]
+        ]
+        if len(failed) > len(preview):
+            preview.append(f"... và {len(failed) - len(preview)} course khác")
+        message = (
+            "Chuẩn bị cho AI hoàn tất.\n\n"
+            f"{len(succeeded)} course thành công.\n"
+            f"{len(failed)} course thất bại.\n\n"
+            "Thất bại:\n"
+            + "\n".join(preview)
+            + "\n\nXem Hoạt động gần đây hoặc app.log để biết chi tiết kỹ thuật."
+        )
+        messagebox.showwarning("Chuẩn bị cho AI", message, parent=self)
 
     def _handle_crawler_event(self, activity: dict) -> None:
         kind = activity.get("event")

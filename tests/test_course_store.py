@@ -63,16 +63,16 @@ def test_edit_remove_and_sync_metadata(tmp_path: Path):
     assert updated.last_downloaded == 3
     assert updated.last_sync
 
-    removed = store.remove(course.id)
-    assert removed.id == course.id
+    removed = store.remove_many([course.id])
+    assert [item.id for item in removed] == [course.id]
     assert CourseStore(store.path).list() == []
 
 
-def test_remove_nonexistent_and_empty_remove_many_are_safe(tmp_path: Path):
+def test_nonexistent_and_empty_remove_many_are_safe(tmp_path: Path):
     store = CourseStore(tmp_path / "courses.json")
     course = store.add(course_url(3093), tmp_path / "course", name="Mạng máy tính (CO3093)")
 
-    assert store.remove("does-not-exist") is None
+    assert store.remove_many(["does-not-exist"]) == []
     assert store.remove_many([]) == []
     assert [item.id for item in store.list()] == [course.id]
 
@@ -124,7 +124,7 @@ def test_remove_operations_never_delete_downloaded_files_or_output_folders(tmp_p
     first = store.add(course_url(3001), output, name="Công nghệ phần mềm (CO3001)")
     second = store.add(course_url(3093), output, name="Mạng máy tính (CO3093)")
 
-    assert store.remove(first.id) is not None
+    assert [course.id for course in store.remove_many([first.id])] == [first.id]
     assert output.is_dir() and slide.is_file() and lecture.is_file()
     assert [course.id for course in store.remove_many([second.id])] == [second.id]
     assert output.is_dir() and slide.is_file() and lecture.is_file()

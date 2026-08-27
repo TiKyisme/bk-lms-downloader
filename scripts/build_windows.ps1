@@ -25,12 +25,21 @@ $Python = Join-Path $Venv "Scripts\python.exe"
     --paths "src" `
     --collect-submodules bklms_downloader `
     --collect-all customtkinter `
+    --hidden-import markdownify `
+    --hidden-import pypdf `
+    --hidden-import pptx `
     --collect-all selenium `
+    --add-data "tools/prepare_ai_course.py;tools" `
     "app.py"
 
 $Exe = Join-Path $RepoRoot "dist\BK-LMS-Downloader.exe"
 if (-not (Test-Path $Exe)) {
     throw "Build finished but EXE was not found: $Exe"
+}
+
+& $Exe --self-test-ai
+if ($LASTEXITCODE -ne 0) {
+    throw "Packaged AI runtime smoke failed."
 }
 
 Write-Host "" 

@@ -16,6 +16,7 @@ build/
 dist/
 *.egg-info/
 *.spec
+/BK-LMS-Downloader.exe
 
 # IDE / OS
 .vscode/

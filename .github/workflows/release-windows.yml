@@ -42,8 +42,18 @@ jobs:
             --paths "src" `
             --collect-submodules bklms_downloader `
             --collect-all customtkinter `
+            --hidden-import markdownify `
+            --hidden-import pypdf `
+            --hidden-import pptx `
             --collect-all selenium `
+            --add-data "tools/prepare_ai_course.py;tools" `
             "app.py"
+
+      - name: Smoke test packaged AI runtime
+        shell: pwsh
+        run: |
+          ./dist/BK-LMS-Downloader.exe --self-test-ai
+          if ($LASTEXITCODE -ne 0) { throw "Packaged AI runtime smoke failed." }
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4

@@ -377,16 +377,16 @@ def html_to_markdown(path: Path) -> str:
 def extract_pdf(path: Path) -> tuple[str, list[tuple[str, str]]]:
     """Return (full markdown body, [(locator, unit_text), ...])."""
     try:
-        import fitz  # PyMuPDF
+        from pypdf import PdfReader
     except ImportError as exc:
-        raise RuntimeError("Thiếu pymupdf. Chạy: pip install pymupdf") from exc
+        raise RuntimeError("Thiếu pypdf. Chạy: pip install pypdf") from exc
 
-    doc = fitz.open(path)
+    reader = PdfReader(path)
     units: list[tuple[str, str]] = []
     pieces: list[str] = []
 
-    for idx, page in enumerate(doc, start=1):
-        text = clean_text(page.get_text("text"))
+    for idx, page in enumerate(reader.pages, start=1):
+        text = clean_text(page.extract_text() or "")
         if not text:
             continue
         locator = f"page {idx}"
@@ -1372,8 +1372,8 @@ def validate_args(args) -> None:
         raise ValueError("--chunk-overlap phải nhỏ hơn --chunk-chars")
 
 
-def main():
-    args = parse_args()
+def run_preparation(args) -> Path:
+    """Run one local knowledge-base build; reusable by the packaged GUI."""
     validate_args(args)
 
     output_root = args.output.expanduser().resolve()
@@ -1407,6 +1407,11 @@ def main():
     print(f"Course index   : {output_root / 'course_index.md'}")
     print(f"RAG corpus     : {output_root / 'meta' / 'corpus.jsonl'}")
     print(f"Report         : {output_root / 'processing_report.md'}")
+    return output_root
+
+
+def main():
+    run_preparation(parse_args())
 
 
 if __name__ == "__main__":

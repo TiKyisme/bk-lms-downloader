@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.0.4 - 2026-08-27
+
+- Clean BK-LMS accessibility prefixes from imported course names while
+  preserving course codes and class metadata.
+- Simplify Delete and AI preparation actions to checked courses or all courses.
+- Bundle the complete local AI preparation runtime in the Windows release and
+  validate HTML, PDF, and PPTX extraction with a packaged `--self-test-ai` gate.
+
+## 1.0.3 - 2026-08-27
+
+- Bundle local AI preparation for the Windows release instead of relying on a
+  source-only subprocess.
+- Add sequential AI preparation for checked courses or all saved courses, with
+  per-course progress and isolated failures.
+
+## 1.0.2 - 2026-08-27
+
+- Remove BK-LMS accessibility text "Khóa học được đánh dấu sao" from imported
+  course names without changing course codes or other metadata.
+
 ## 1.0.1 - 2026-08-27
 
 - Add one-course, checked-course, and all-course removal from the My Courses

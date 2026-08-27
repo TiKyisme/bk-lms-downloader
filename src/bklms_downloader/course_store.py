@@ -124,11 +124,6 @@ class CourseStore:
         self.save()
         return course
 
-    def remove(self, course_id: str) -> Course | None:
-        """Remove one saved-course record without touching its output folder."""
-        removed = self.remove_many([course_id])
-        return removed[0] if removed else None
-
     def remove_many(self, course_ids: Iterable[str]) -> list[Course]:
         """Remove saved-course records in one persistence write, if any exist.
 

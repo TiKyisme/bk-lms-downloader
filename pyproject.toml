@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "bk-lms-downloader"
-version = "1.0.1"
+version = "1.0.4"
 description = "Unofficial BK-LMS course material downloader for HCMUT students"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -29,6 +29,9 @@ dependencies = [
   "selenium>=4.20,<5",
   "customtkinter>=5.2,<6",
   "pillow>=10,<13",
+  "markdownify>=0.13,<1",
+  "pypdf>=5,<7",
+  "python-pptx>=1.0,<2",
 ]
 
 [project.optional-dependencies]
@@ -36,13 +39,6 @@ dev = [
   "pytest>=8,<9",
   "pyinstaller>=6.10,<7",
 ]
-ai = [
-  "beautifulsoup4>=4.12,<5",
-  "markdownify>=0.13,<1",
-  "pymupdf>=1.24,<2",
-  "python-pptx>=1.0,<2",
-]
-
 [project.scripts]
 bklms = "bklms_downloader.cli:main"
 bklms-gui = "bklms_downloader.gui:main"

@@ -6,6 +6,7 @@ import requests
 from bklms_downloader.course_discovery import (
     CourseDiscoveryError,
     SessionExpiredError,
+    clean_course_name,
     discover_courses,
     discover_courses_from_browser,
     discover_courses_with_browser_fallback,
@@ -15,6 +16,49 @@ from bklms_downloader.course_discovery import (
 
 FIXTURES = Path(__file__).parent / "fixtures"
 MY_COURSES_URL = "https://lms.hcmut.edu.vn/my/courses.php"
+
+
+@pytest.mark.parametrize(
+    ("raw_name", "expected"),
+    [
+        (
+            "Khóa học được đánh dấu sao Tên khóa học Hệ cơ sở Dữ liệu (CO2013)",
+            "Hệ cơ sở Dữ liệu (CO2013)",
+        ),
+        (
+            " Khóa học được đánh dấu sao     Tên khóa học Công nghệ Phần mềm (CO3001)",
+            "Công nghệ Phần mềm (CO3001)",
+        ),
+        (
+            "Khóa học được đánh dấu sao Khóa học được đánh dấu sao "
+            "Tên khóa học Mạng máy tính (CO3093)",
+            "Mạng máy tính (CO3093)",
+        ),
+        (
+            "Tên khóa học Công nghệ Phần mềm (CO3001)_NGUYỄN MINH TÂM",
+            "Công nghệ Phần mềm (CO3001)_NGUYỄN MINH TÂM",
+        ),
+        (
+            "Khóa học được đánh dấu sao Tên khóa học Hệ cơ sở Dữ liệu (CO2013)_TRƯƠNG QUỲNH CHI",
+            "Hệ cơ sở Dữ liệu (CO2013)_TRƯƠNG QUỲNH CHI",
+        ),
+        (
+            "Khóa học được đánh dấu sao Tên khóa học Mạng máy tính "
+            "(CO3093)_NGUYỄN PHƯƠNG DUY (CQ_HK261) [L02,L03]",
+            "Mạng máy tính (CO3093)_NGUYỄN PHƯƠNG DUY (CQ_HK261) [L02,L03]",
+        ),
+        (
+            "Khóa học được đánh dấu sao Tên khóa học Tên khóa học Giải tích (MT1003)",
+            "Giải tích (MT1003)",
+        ),
+        (
+            "Giới thiệu nhãn Tên khóa học trong nội dung môn",
+            "Giới thiệu nhãn Tên khóa học trong nội dung môn",
+        ),
+    ],
+)
+def test_clean_course_name_removes_only_accessibility_prefixes(raw_name, expected):
+    assert clean_course_name(raw_name) == expected
 
 
 class FakeResponse:
@@ -159,6 +203,22 @@ def test_parse_standard_course_cards_with_unicode_and_codes():
 
     assert [(course.course_id, course.code) for course in courses] == [("2013", "CO2013"), ("1013", "GE1013")]
     assert courses[0].name == "Hệ cơ sở dữ liệu (CO2013)"
+
+
+def test_parser_cleans_starred_accessibility_text_before_course_code_extraction():
+    html = """
+    <div class="course-card">
+      <h3 class="coursename">
+        <a href="/course/view.php?id=2013">Khóa học được đánh dấu sao Tên khóa học Hệ cơ sở Dữ liệu (CO2013)_TRƯƠNG</a>
+      </h3>
+    </div>
+    """
+
+    courses = parse_discovered_courses(html)
+
+    assert [(course.name, course.code) for course in courses] == [
+        ("Hệ cơ sở Dữ liệu (CO2013)_TRƯƠNG", "CO2013")
+    ]
 
 
 def test_parse_alternate_markup_and_deduplicate_urls():

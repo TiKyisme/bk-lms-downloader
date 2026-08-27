@@ -19,7 +19,7 @@ No Python or Git setup is needed for the normal GUI experience.
 5. Run **Sync all** again later; existing unchanged files are skipped.
 
 The app remembers both your course list and last output folder. You can remove
-one, checked, or all courses from the app list; this never deletes downloaded
+checked courses or all courses from the app list; this never deletes downloaded
 files or folders on your computer.
 
 ## Screenshot
@@ -29,8 +29,8 @@ files or folders on your computer.
 ## Features
 
 - Chrome-based login without password fields.
-- Saved courses, output-folder memory, manual add/edit/remove (one, checked, or
-  all), and safe course import.
+- Saved courses, output-folder memory, manual add/edit, checked/all removal, and
+  safe course import.
 - Sequential Sync selected / Sync all with one in-memory session per batch.
 - Compact student-friendly folders: course info, lectures, labs, assignments,
   references, and other material.
@@ -38,7 +38,8 @@ files or folders on your computer.
 - Existing files are kept when unchanged; Vietnamese filenames are repaired.
 - Video downloads are permanently disabled.
 - Passive GitHub Release update notice—updates only open after your click.
-- Optional **Công cụ → Chuẩn bị cho AI** preparation for advanced source installs.
+- Local **Công cụ → Chuẩn bị cho AI** preparation for checked courses or all
+  courses—also included in the Windows release.
 
 ## Privacy
 
@@ -59,9 +60,9 @@ available.
 **Cannot write files** — edit the course and choose a folder where your Windows
 account has write permission.
 
-**AI preparation says dependencies are missing** — this optional feature is for
-source installs. Install them with `pip install .[ai]`; normal sync never needs
-these packages.
+**AI preparation fails** — ensure the course has been synced first, then check
+the app activity log. The Windows release already includes the local AI
+preparation components; no Python, pip, or API key is required.
 
 ## Output layout
 
@@ -83,11 +84,11 @@ There is no Complete Archive mode, no `COURSE_*` output tree, no
 
 ## Optional AI preparation
 
-For an already downloaded course, choose **Công cụ → Chuẩn bị cho AI**. With
-the optional AI dependencies installed, it creates a local `AI_Knowledge/`
-folder containing source-aware Markdown, documents, chunks, and metadata. It
-does not add AI chat, cloud accounts, API keys, video transcription, or CUDA
-requirements to the downloader.
+For downloaded courses, choose **Công cụ → Chuẩn bị đã chọn cho AI** or
+**Chuẩn bị tất cả cho AI**. Each course gets its own local `AI_Knowledge/`
+folder containing source-aware Markdown, documents, chunks, and metadata. The
+Windows release includes this local preparation feature; it does not add AI
+chat, cloud accounts, API keys, video transcription, or CUDA requirements.
 
 See [tools/README_prepare_ai_course.md](tools/README_prepare_ai_course.md) for
 the standalone source-tool workflow.

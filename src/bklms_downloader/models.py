@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -78,6 +79,11 @@ class Course:
             "last_skipped": self.last_skipped,
             "last_errors": self.last_errors,
         }
+
+
+def checked_courses(courses: Iterable[Course]) -> list[Course]:
+    """Return checkbox-selected courses without mutating their shared state."""
+    return [course for course in courses if course.selected]
 
 
 @dataclass

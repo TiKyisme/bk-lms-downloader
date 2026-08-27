@@ -1,4 +1,4 @@
-# BK-LMS Downloader v1.0.1 release checklist
+# BK-LMS Downloader v1.0.4 release checklist
 
 Complete this manual checklist before creating the public tag.
 
@@ -8,6 +8,7 @@ Complete this manual checklist before creating the public tag.
 - [ ] EXE opens without Python installed.
 - [ ] Chrome opens and official BK-LMS login works.
 - [ ] **Nhập từ BK-LMS** lists accessible courses.
+- [ ] Imported names do not include `Khóa học được đánh dấu sao` or `Tên khóa học` prefixes.
 - [ ] Manual Add Course works and remembers the output folder.
 - [ ] Sync selected works.
 - [ ] Sync all works sequentially.
@@ -16,11 +17,16 @@ Complete this manual checklist before creating the public tag.
 - [ ] Compact output folders are correct.
 - [ ] Linked courses are flattened.
 - [ ] Videos are skipped.
-- [ ] Removing one saved course does not remove its files.
 - [ ] Removing checked courses does not remove their files or folders.
 - [ ] Removing all saved courses does not remove any downloaded files or folders.
 - [ ] Update notice is checked with a newer/no-newer release scenario.
-- [ ] Optional AI preparation is checked from a source install with `.[ai]`.
+- [ ] Prepare multiple checked courses for AI from the packaged EXE.
+- [ ] Prepare all courses for AI from the packaged EXE.
+- [ ] Each course gets its own `AI_Knowledge` folder.
+- [ ] A failure in one course does not stop the remaining AI batch.
+- [ ] Original downloaded files remain untouched by AI preparation.
+- [ ] Packaged EXE requires no Python or pip installation for AI preparation.
+- [ ] Packaged `BK-LMS-Downloader.exe --self-test-ai` exits successfully.
 - [ ] No credentials, cookies, or session material are present in repository files or logs.
 - [ ] README screenshot and download instructions are current.
-- [ ] Create `v1.0.1` only after all above smoke tests pass.
+- [ ] Create `v1.0.4` only after all above smoke tests pass.
