@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.1 - 2026-08-27
+
+- Add one-course, checked-course, and all-course removal from the My Courses
+  list with explicit Vietnamese confirmation dialogs.
+- Keep downloaded files and folders untouched: course removal only updates the
+  application's persisted `courses.json` list.
+
 ## 1.0.0 - 2026-08-26
 
 - Stabilize the student-focused BK-LMS Downloader public release.

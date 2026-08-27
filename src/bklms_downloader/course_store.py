@@ -5,6 +5,7 @@ import os
 import shutil
 import tempfile
 import uuid
+from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
 
@@ -123,11 +124,33 @@ class CourseStore:
         self.save()
         return course
 
-    def remove(self, course_id: str) -> Course:
-        course = self._require(course_id)
-        self._courses.remove(course)
+    def remove(self, course_id: str) -> Course | None:
+        """Remove one saved-course record without touching its output folder."""
+        removed = self.remove_many([course_id])
+        return removed[0] if removed else None
+
+    def remove_many(self, course_ids: Iterable[str]) -> list[Course]:
+        """Remove saved-course records in one persistence write, if any exist.
+
+        Course output paths are metadata only.  This method intentionally never
+        performs a filesystem deletion; downloaded documents stay untouched.
+        """
+        ids = {str(course_id) for course_id in course_ids}
+        if not ids:
+            return []
+        removed = [course for course in self._courses if course.id in ids]
+        if not removed:
+            return []
+        self._courses = [course for course in self._courses if course.id not in ids]
         self.save()
-        return course
+        return removed
+
+    def clear(self) -> list[Course]:
+        """Persist an empty saved-course list without deleting downloaded files."""
+        removed = self.list()
+        self._courses = []
+        self.save()
+        return removed
 
     def update_sync(self, course_id: str, result: CourseSyncResult) -> Course:
         course = self._require(course_id)

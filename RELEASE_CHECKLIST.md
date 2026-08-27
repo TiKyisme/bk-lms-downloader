@@ -1,4 +1,4 @@
-# BK-LMS Downloader v1.0.0 release checklist
+# BK-LMS Downloader v1.0.1 release checklist
 
 Complete this manual checklist before creating the public tag.
 
@@ -16,9 +16,11 @@ Complete this manual checklist before creating the public tag.
 - [ ] Compact output folders are correct.
 - [ ] Linked courses are flattened.
 - [ ] Videos are skipped.
-- [ ] Removing a saved course does not remove its files.
+- [ ] Removing one saved course does not remove its files.
+- [ ] Removing checked courses does not remove their files or folders.
+- [ ] Removing all saved courses does not remove any downloaded files or folders.
 - [ ] Update notice is checked with a newer/no-newer release scenario.
 - [ ] Optional AI preparation is checked from a source install with `.[ai]`.
 - [ ] No credentials, cookies, or session material are present in repository files or logs.
 - [ ] README screenshot and download instructions are current.
-- [ ] Create `v1.0.0` only after all above smoke tests pass.
+- [ ] Create `v1.0.1` only after all above smoke tests pass.

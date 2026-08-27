@@ -356,6 +356,83 @@ class ImportCoursesDialog(ctk.CTkToplevel):
         self.destroy()
 
 
+class DeleteConfirmationDialog(ctk.CTkToplevel):
+    """Explicitly confirm removing saved-course records, never local documents."""
+
+    def __init__(
+        self,
+        parent: "App",
+        *,
+        title: str,
+        message: str,
+        confirm_text: str,
+        on_confirm: Callable[[], None],
+    ):
+        super().__init__(parent)
+        self.on_confirm = on_confirm
+        self.title(title)
+        self.geometry("590x360")
+        self.minsize(500, 280)
+        self.configure(fg_color=THEME.bg)
+        self.transient(parent)
+        self.grab_set()
+
+        card = ctk.CTkFrame(
+            self,
+            fg_color=THEME.surface,
+            border_color=THEME.border,
+            border_width=1,
+            corner_radius=THEME.radius,
+        )
+        card.pack(fill="both", expand=True, padx=18, pady=18)
+        card.grid_columnconfigure(0, weight=1)
+        card.grid_rowconfigure(1, weight=1)
+        ctk.CTkLabel(
+            card,
+            text=title,
+            font=(THEME.font_family, 18, "bold"),
+            text_color=THEME.text,
+        ).grid(row=0, column=0, sticky="w", padx=20, pady=(20, 8))
+        ctk.CTkLabel(
+            card,
+            text=message,
+            justify="left",
+            anchor="nw",
+            wraplength=530,
+            font=(THEME.font_family, 13),
+            text_color=THEME.text,
+        ).grid(row=1, column=0, sticky="nsew", padx=20, pady=(0, 14))
+        actions = ctk.CTkFrame(card, fg_color="transparent")
+        actions.grid(row=2, column=0, sticky="e", padx=20, pady=(0, 20))
+        ctk.CTkButton(
+            actions,
+            text="Hủy",
+            command=self.destroy,
+            height=38,
+            width=96,
+            fg_color=THEME.surface,
+            hover_color=THEME.inset,
+            text_color=THEME.text,
+            border_color=THEME.border,
+            border_width=1,
+            corner_radius=9,
+        ).pack(side="right")
+        ctk.CTkButton(
+            actions,
+            text=confirm_text,
+            command=self._confirm,
+            height=38,
+            width=126,
+            fg_color=THEME.danger,
+            hover_color="#BE2C3A",
+            corner_radius=9,
+        ).pack(side="right", padx=(0, 8))
+
+    def _confirm(self) -> None:
+        self.on_confirm()
+        self.destroy()
+
+
 class CourseRow(ctk.CTkFrame):
     """A reusable modern row for the CustomTkinter My Courses list."""
 
@@ -628,7 +705,7 @@ class App(ctk.CTk):
         self.add_btn = self._outline_button(action_left, "Thêm course", "plus", self._add_course)
         self.import_btn = self._outline_button(action_left, "Nhập từ BK-LMS", "download", self._import_courses)
         self.edit_btn = self._outline_button(action_left, "Sửa", "edit", self._edit_course)
-        self.delete_btn = self._outline_button(action_left, "Xóa", "trash", self._delete_course, danger=True)
+        self.delete_btn = self._outline_button(action_left, "Xóa", "trash", self._show_delete_menu, danger=True)
         self.open_btn = self._outline_button(action_left, "Mở thư mục", "folder", self._open_course_folder)
         for button in (self.add_btn, self.import_btn, self.edit_btn, self.delete_btn, self.open_btn):
             button.pack(side="left", padx=(0, 7))
@@ -916,16 +993,90 @@ class App(ctk.CTk):
         course = self._selected_course()
         if course is None:
             return
-        confirmed = messagebox.askyesno(
-            "Xóa course",
-            f"Xóa '{course.display_name}' khỏi danh sách?\n\n"
-            "Tài liệu đã tải trên ổ đĩa sẽ không bị xóa.",
-            parent=self,
+        self._confirm_remove_courses([course], confirm_text="Xóa")
+
+    def _delete_checked_courses(self) -> None:
+        if self.syncing:
+            return
+        courses = [course for course in self.store.list() if course.selected]
+        if not courses:
+            messagebox.showinfo("Xóa course", "Chưa chọn course nào để xóa.", parent=self)
+            return
+        self._confirm_remove_courses(courses, confirm_text="Xóa")
+
+    def _delete_all_courses(self) -> None:
+        if self.syncing:
+            return
+        courses = self.store.list()
+        if not courses:
+            messagebox.showinfo("Xóa tất cả", "Danh sách course đang trống.", parent=self)
+            return
+        message = (
+            "Bạn sắp xóa "
+            f"{len(courses)} course khỏi danh sách BK-LMS Downloader.\n\n"
+            "Các tài liệu đã tải trên ổ đĩa sẽ KHÔNG bị xóa.\n\n"
+            "Bạn có chắc chắn muốn tiếp tục?"
         )
-        if confirmed:
-            self.store.remove(course.id)
+        DeleteConfirmationDialog(
+            self,
+            title="Xóa tất cả course?",
+            message=message,
+            confirm_text="Xóa tất cả",
+            on_confirm=self._clear_courses_from_app,
+        )
+
+    def _confirm_remove_courses(self, courses: list[Course], *, confirm_text: str) -> None:
+        preview = [
+            f"- {course.code or '-'} — {course.display_name}"
+            for course in courses[:5]
+        ]
+        remaining = len(courses) - len(preview)
+        if remaining:
+            preview.append(f"... và {remaining} course khác")
+        message = (
+            f"Xóa {len(courses)} course khỏi danh sách?\n\n"
+            + "\n".join(preview)
+            + "\n\nCác tài liệu đã tải trên ổ đĩa sẽ được giữ nguyên."
+        )
+        DeleteConfirmationDialog(
+            self,
+            title="Xóa course",
+            message=message,
+            confirm_text=confirm_text,
+            on_confirm=lambda: self._remove_courses_from_app(courses),
+        )
+
+    def _remove_courses_from_app(self, courses: list[Course]) -> None:
+        removed = self.store.remove_many(course.id for course in courses)
+        if not removed:
+            return
+        removed_ids = {course.id for course in removed}
+        if self.current_course_id in removed_ids:
             self.current_course_id = None
-            self._refresh_courses()
+        self._refresh_courses()
+        self._set_summary_message(f"Đã xóa {len(removed)} course khỏi danh sách.")
+
+    def _clear_courses_from_app(self) -> None:
+        removed = self.store.clear()
+        self.current_course_id = None
+        self._refresh_courses()
+        self._set_summary_message(f"Đã xóa {len(removed)} course khỏi danh sách.")
+
+    def _show_delete_menu(self) -> None:
+        if self.syncing:
+            return
+        menu = tk.Menu(self, tearoff=False, font=(THEME.font_family, 10))
+        menu.add_command(label="Xóa course đang chọn", command=self._delete_course)
+        menu.add_command(label="Xóa các course đã tick", command=self._delete_checked_courses)
+        menu.add_separator()
+        menu.add_command(label="Xóa tất cả course", command=self._delete_all_courses)
+        try:
+            menu.tk_popup(
+                self.delete_btn.winfo_rootx(),
+                self.delete_btn.winfo_rooty() + self.delete_btn.winfo_height(),
+            )
+        finally:
+            menu.grab_release()
 
     def _open_course_folder(self) -> None:
         course = self._selected_course()

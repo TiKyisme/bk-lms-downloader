@@ -68,6 +68,72 @@ def test_edit_remove_and_sync_metadata(tmp_path: Path):
     assert CourseStore(store.path).list() == []
 
 
+def test_remove_nonexistent_and_empty_remove_many_are_safe(tmp_path: Path):
+    store = CourseStore(tmp_path / "courses.json")
+    course = store.add(course_url(3093), tmp_path / "course", name="Mạng máy tính (CO3093)")
+
+    assert store.remove("does-not-exist") is None
+    assert store.remove_many([]) == []
+    assert [item.id for item in store.list()] == [course.id]
+
+
+def test_remove_many_persists_once_and_ignores_unknown_ids(tmp_path: Path, monkeypatch):
+    store = CourseStore(tmp_path / "courses.json")
+    first = store.add(course_url(3001), tmp_path / "first", name="Công nghệ phần mềm (CO3001)")
+    second = store.add(course_url(3093), tmp_path / "second", name="Mạng máy tính (CO3093)")
+    third = store.add(course_url(3094), tmp_path / "third", name="Mạng máy tính (CO3094)")
+    save_calls = 0
+    original_save = store.save
+
+    def count_save():
+        nonlocal save_calls
+        save_calls += 1
+        original_save()
+
+    monkeypatch.setattr(store, "save", count_save)
+    removed = store.remove_many([first.id, third.id, "does-not-exist", first.id])
+
+    assert [course.id for course in removed] == [first.id, third.id]
+    assert [course.id for course in store.list()] == [second.id]
+    assert save_calls == 1
+    assert [course.id for course in CourseStore(store.path).list()] == [second.id]
+
+
+def test_clear_persists_an_empty_course_list(tmp_path: Path):
+    path = tmp_path / "courses.json"
+    store = CourseStore(path)
+    store.add(course_url(3001), tmp_path / "first", name="Công nghệ phần mềm (CO3001)")
+    store.add(course_url(3093), tmp_path / "second", name="Mạng máy tính (CO3093)")
+
+    removed = store.clear()
+
+    assert len(removed) == 2
+    assert store.list() == []
+    assert CourseStore(path).list() == []
+    assert json.loads(path.read_text(encoding="utf-8"))["courses"] == []
+
+
+def test_remove_operations_never_delete_downloaded_files_or_output_folders(tmp_path: Path):
+    output = tmp_path / "downloads" / "Course A"
+    output.mkdir(parents=True)
+    slide = output / "slide.pdf"
+    lecture = output / "lecture.docx"
+    slide.write_text("slide", encoding="utf-8")
+    lecture.write_text("lecture", encoding="utf-8")
+    store = CourseStore(tmp_path / "courses.json")
+    first = store.add(course_url(3001), output, name="Công nghệ phần mềm (CO3001)")
+    second = store.add(course_url(3093), output, name="Mạng máy tính (CO3093)")
+
+    assert store.remove(first.id) is not None
+    assert output.is_dir() and slide.is_file() and lecture.is_file()
+    assert [course.id for course in store.remove_many([second.id])] == [second.id]
+    assert output.is_dir() and slide.is_file() and lecture.is_file()
+
+    third = store.add(course_url(3094), output, name="Mạng máy tính (CO3094)")
+    assert store.clear() == [third]
+    assert output.is_dir() and slide.is_file() and lecture.is_file()
+
+
 def test_corrupted_config_and_invalid_entries_do_not_crash(tmp_path: Path):
     path = tmp_path / "courses.json"
     path.write_text("{not valid json", encoding="utf-8")

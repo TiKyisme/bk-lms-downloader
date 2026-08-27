@@ -18,17 +18,19 @@ No Python or Git setup is needed for the normal GUI experience.
 4. Choose courses and click **Sync all** (or **Sync selected**).
 5. Run **Sync all** again later; existing unchanged files are skipped.
 
-The app remembers both your course list and last output folder. Removing a
-course from the app never deletes downloaded files.
+The app remembers both your course list and last output folder. You can remove
+one, checked, or all courses from the app list; this never deletes downloaded
+files or folders on your computer.
 
 ## Screenshot
 
-![BK-LMS Downloader v1.0.0 main window](docs/images/v1.0.0-main-window.png)
+![BK-LMS Downloader main window](docs/images/v1.0.0-main-window.png)
 
 ## Features
 
 - Chrome-based login without password fields.
-- Saved courses, output-folder memory, manual add/edit/remove, and safe course import.
+- Saved courses, output-folder memory, manual add/edit/remove (one, checked, or
+  all), and safe course import.
 - Sequential Sync selected / Sync all with one in-memory session per batch.
 - Compact student-friendly folders: course info, lectures, labs, assignments,
   references, and other material.
