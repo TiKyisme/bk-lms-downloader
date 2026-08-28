@@ -62,6 +62,20 @@ def run_scroll_runtime_smoke() -> None:
         app.update_idletasks()
         app.update()
 
+        # Long/short activity headlines may wrap inside the progress pane, but
+        # must never alter the allocated Recent Activity viewport.
+        log_size = (app.log_area.winfo_width(), app.log_area.winfo_height())
+        app.current_course_var.set(
+            "Đang tải: " + ("CHƯƠNG 03 TÀI LIỆU RẤT DÀI " * 12) + "(Phần 4)"
+        )
+        app.update_idletasks()
+        app.update()
+        assert (app.log_area.winfo_width(), app.log_area.winfo_height()) == log_size
+        app.current_course_var.set("Đang tải: lecture.pdf")
+        app.update_idletasks()
+        app.update()
+        assert (app.log_area.winfo_width(), app.log_area.winfo_height()) == log_size
+
         main_canvas = app.main_scroll._parent_canvas
         course_canvas = app.course_scroll._parent_canvas
         activity_text = app.log_text._textbox

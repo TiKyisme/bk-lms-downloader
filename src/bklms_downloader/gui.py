@@ -39,6 +39,16 @@ from .utils import is_course_url, safe_name
 LOG = get_logger(__name__)
 
 
+def shorten_sync_activity(message: str, limit: int = 104) -> str:
+    """Keep the live sync headline readable without losing log detail."""
+    text = " ".join(str(message).split())
+    if limit < 8 or len(text) <= limit:
+        return text
+    head = int(limit * 0.72)
+    tail = limit - head - 1
+    return f"{text[:head].rstrip()}…{text[-tail:].lstrip()}"
+
+
 class CourseDialog(ctk.CTkToplevel):
     """A compact CustomTkinter dialog for adding or editing a saved course."""
 
@@ -973,28 +983,43 @@ class App(ctk.CTk):
     def _build_sync_card(self) -> None:
         sync_card = self._card(self.main_scroll)
         sync_card.grid(row=2, column=0, sticky="ew", padx=18, pady=(0, 12))
-        sync_card.grid_columnconfigure(0, weight=4)
-        sync_card.grid_columnconfigure(1, weight=5)
-        self._card_title(sync_card, "sync", "Đồng bộ", 0, columnspan=2)
+        sync_card.grid_columnconfigure(0, weight=1)
+        sync_card.grid_rowconfigure(1, weight=1)
+        self._card_title(sync_card, "sync", "Đồng bộ", 0)
 
-        progress_area = ctk.CTkFrame(sync_card, fg_color="transparent")
-        progress_area.grid(row=1, column=0, sticky="nsew", padx=(18, 14), pady=(0, 18))
-        progress_area.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(
-            progress_area,
+        self.sync_content = ctk.CTkFrame(sync_card, fg_color="transparent")
+        self.sync_content.grid(row=1, column=0, sticky="ew", pady=(0, 18))
+        self.sync_content.grid_columnconfigure(0, weight=2, uniform="sync-content")
+        self.sync_content.grid_columnconfigure(1, weight=1, uniform="sync-content")
+        self.sync_content.grid_rowconfigure(0, weight=1, minsize=210)
+
+        self.progress_area = ctk.CTkFrame(
+            self.sync_content,
+            fg_color="transparent",
+            height=210,
+        )
+        self.progress_area.grid(row=0, column=0, sticky="nsew", padx=(18, 10))
+        self.progress_area.grid_propagate(False)
+        self.progress_area.grid_columnconfigure(0, weight=1)
+        self.progress_area.grid_rowconfigure(0, minsize=48)
+        self.current_activity_label = ctk.CTkLabel(
+            self.progress_area,
             textvariable=self.current_course_var,
-            anchor="w",
+            anchor="nw",
+            justify="left",
+            wraplength=420,
             font=(THEME.font_family, 14, "bold"),
             text_color=THEME.text,
-        ).grid(row=0, column=0, sticky="w")
+        )
+        self.current_activity_label.grid(row=0, column=0, sticky="new")
         ctk.CTkLabel(
-            progress_area,
+            self.progress_area,
             textvariable=self.overall_var,
             font=(THEME.font_family, 13, "bold"),
             text_color=THEME.muted_text,
         ).grid(row=0, column=1, sticky="e")
         self.progress = ctk.CTkProgressBar(
-            progress_area,
+            self.progress_area,
             height=11,
             corner_radius=6,
             fg_color="#E2E8F0",
@@ -1002,7 +1027,7 @@ class App(ctk.CTk):
         )
         self.progress.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(16, 16))
         self.progress.set(0)
-        self.summary_line = ctk.CTkFrame(progress_area, fg_color="transparent")
+        self.summary_line = ctk.CTkFrame(self.progress_area, fg_color="transparent")
         self.summary_line.grid(row=2, column=0, columnspan=2, sticky="w")
         self.summary_new = ctk.CTkLabel(
             self.summary_line,
@@ -1026,7 +1051,7 @@ class App(ctk.CTk):
         )
         self.summary_errors.pack(side="left")
         self.sync_elapsed_label = ctk.CTkLabel(
-            progress_area,
+            self.progress_area,
             textvariable=self.sync_elapsed_var,
             anchor="w",
             font=(THEME.font_family, 12),
@@ -1034,7 +1059,7 @@ class App(ctk.CTk):
         )
         self.sync_elapsed_label.grid(row=3, column=0, sticky="w", pady=(8, 0))
         self.cancel_sync_btn = ctk.CTkButton(
-            progress_area,
+            self.progress_area,
             text="Hủy đồng bộ",
             command=self._request_cancel_sync,
             height=34,
@@ -1049,25 +1074,29 @@ class App(ctk.CTk):
             state="disabled",
         )
         self.cancel_sync_btn.grid(row=3, column=1, sticky="e", pady=(8, 0))
+        self._sync_wrap_after_id = None
+        self._sync_wrap_length = None
+        self.progress_area.bind("<Configure>", self._schedule_current_activity_wrap)
+        self.after_idle(self._update_current_activity_wrap)
 
-        log_area = ctk.CTkFrame(
-            sync_card,
+        self.log_area = ctk.CTkFrame(
+            self.sync_content,
             fg_color=THEME.inset,
             border_color=THEME.border,
             border_width=1,
             corner_radius=11,
         )
-        log_area.grid(row=1, column=1, sticky="nsew", padx=(0, 18), pady=(0, 18))
-        log_area.grid_columnconfigure(0, weight=1)
-        log_area.grid_rowconfigure(1, weight=1)
+        self.log_area.grid(row=0, column=1, sticky="nsew", padx=(10, 18))
+        self.log_area.grid_columnconfigure(0, weight=1)
+        self.log_area.grid_rowconfigure(1, weight=1)
         ctk.CTkLabel(
-            log_area,
+            self.log_area,
             text="Hoạt động gần đây",
             font=(THEME.font_family, 12, "bold"),
             text_color=THEME.muted_text,
         ).grid(row=0, column=0, sticky="w", padx=12, pady=(10, 5))
         self.log_text = ctk.CTkTextbox(
-            log_area,
+            self.log_area,
             height=148,
             fg_color=THEME.surface,
             border_width=0,
@@ -1080,6 +1109,21 @@ class App(ctk.CTk):
         )
         self.log_text.grid(row=1, column=0, sticky="nsew", padx=8, pady=(0, 8))
         self.log_text.configure(state="disabled")
+
+    def _schedule_current_activity_wrap(self, _event=None) -> None:
+        if self._sync_wrap_after_id is None:
+            self._sync_wrap_after_id = self.after_idle(self._update_current_activity_wrap)
+
+    def _update_current_activity_wrap(self) -> None:
+        self._sync_wrap_after_id = None
+        width = self.progress_area.winfo_width()
+        if width <= 1:
+            return
+        # Keep room for the overall course count in the same grid row.
+        wraplength = max(220, width - 110)
+        if wraplength != self._sync_wrap_length:
+            self.current_activity_label.configure(wraplength=wraplength)
+            self._sync_wrap_length = wraplength
 
     def _card(self, parent) -> ctk.CTkFrame:
         return ctk.CTkFrame(
@@ -1787,7 +1831,7 @@ class App(ctk.CTk):
                 "resource_retry",
                 "resource_timeout",
             }:
-                self.current_course_var.set(message)
+                self.current_course_var.set(shorten_sync_activity(message))
             self._log(f"{prefixes[kind]} {message}")
 
     def _complete_sync(self, batch: SyncBatchResult, total: int) -> None:

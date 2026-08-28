@@ -1,4 +1,4 @@
-from bklms_downloader.gui import App
+from bklms_downloader.gui import App, shorten_sync_activity
 from bklms_downloader.models import Course, checked_courses
 from bklms_downloader.ui_theme import THEME
 
@@ -41,3 +41,15 @@ def test_checked_courses_is_shared_source_of_truth_for_batch_actions():
 
     assert checked_courses([checked, unchecked]) == [checked]
     assert checked_courses([unchecked]) == []
+
+
+def test_long_sync_activity_headline_is_compact_but_keeps_meaningful_ends():
+    message = "Đang tải: " + ("CHƯƠNG 03 TÀI LIỆU DÀI " * 8) + "(Phần 4)"
+
+    compact = shorten_sync_activity(message, limit=64)
+
+    assert compact.startswith("Đang tải:")
+    assert compact.endswith("(Phần 4)")
+    assert "…" in compact
+    assert len(compact) <= 64
+    assert shorten_sync_activity("Đang tải: lecture.pdf", limit=64) == "Đang tải: lecture.pdf"
