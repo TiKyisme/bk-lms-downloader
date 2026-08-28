@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.8 - 2026-08-28
+
+- Bound crawler opening/retry work with separate connect/read timeouts and a
+  total resource deadline; slow or broken resources are reported and skipped
+  without stopping later resources or courses.
+- Add bounded HTML/stream reading, size-aware large-file deadlines, periodic
+  activity updates, response cleanup, and safe removal of failed `.part` files.
+- Add cooperative **Hủy đồng bộ** cancellation that preserves already completed
+  downloads and always returns the GUI to an idle state.
+- Add deterministic offline timeout/cancellation regression coverage and a
+  packaged synthetic normal → timeout → normal sync smoke gate.
+
 ## 1.0.7 - 2026-08-28
 
 - Generate a portable ChatGPT-ready AI Study Pack with course map, coverage

@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from pathlib import Path
+from threading import Event
 from typing import Any
 
 import requests
 
 from .course_store import CourseStore
-from .crawler import DeepDownloader
+from .crawler import DeepDownloader, SyncCancelled
 from .models import Course, CourseSyncResult, SyncBatchResult
 from .utils import extract_course_code
 
@@ -39,43 +40,83 @@ class SyncManager:
         courses: Iterable[Course],
         session: requests.Session,
         event_callback: EventCallback | None = None,
+        cancel_event: Event | None = None,
     ) -> SyncBatchResult:
         course_list = list(courses)
         results: list[CourseSyncResult] = []
         authentication_error = False
+        cancelled = False
 
-        for index, course in enumerate(course_list, start=1):
+        try:
+            for index, course in enumerate(course_list, start=1):
+                if cancel_event is not None and cancel_event.is_set():
+                    cancelled = True
+                    self._emit(
+                        event_callback,
+                        "sync_cancelled",
+                        index=index,
+                        total=len(course_list),
+                    )
+                    break
+
+                self._emit(
+                    event_callback,
+                    "course_sync_start",
+                    course=course,
+                    index=index,
+                    total=len(course_list),
+                )
+                try:
+                    result = self.sync_course(
+                        course,
+                        session,
+                        event_callback,
+                        cancel_event=cancel_event,
+                    )
+                except SyncCancelled:
+                    cancelled = True
+                    self._emit(
+                        event_callback,
+                        "sync_cancelled",
+                        course=course,
+                        index=index,
+                        total=len(course_list),
+                    )
+                    break
+
+                results.append(result)
+                if self.store is not None:
+                    try:
+                        self.store.update_sync(course.id, result)
+                    except OSError:
+                        # A metadata write failure must not strand an otherwise
+                        # completed batch in the busy UI state.
+                        pass
+                self._emit(
+                    event_callback,
+                    "course_sync_complete",
+                    course=course,
+                    result=result,
+                    index=index,
+                    total=len(course_list),
+                )
+
+                if self._is_authentication_error(result):
+                    authentication_error = True
+                    break
+        finally:
+            batch = SyncBatchResult(
+                results,
+                authentication_error=authentication_error,
+                cancelled=cancelled,
+            )
+            # The final event is the GUI's guaranteed path out of busy mode.
             self._emit(
                 event_callback,
-                "course_sync_start",
-                course=course,
-                index=index,
+                "sync_all_complete",
+                result=batch,
                 total=len(course_list),
             )
-            result = self.sync_course(course, session, event_callback)
-            results.append(result)
-            if self.store is not None:
-                self.store.update_sync(course.id, result)
-            self._emit(
-                event_callback,
-                "course_sync_complete",
-                course=course,
-                result=result,
-                index=index,
-                total=len(course_list),
-            )
-
-            if self._is_authentication_error(result):
-                authentication_error = True
-                break
-
-        batch = SyncBatchResult(results, authentication_error=authentication_error)
-        self._emit(
-            event_callback,
-            "sync_all_complete",
-            result=batch,
-            total=len(course_list),
-        )
         return batch
 
     def sync_course(
@@ -83,6 +124,8 @@ class SyncManager:
         course: Course,
         session: requests.Session,
         event_callback: EventCallback | None = None,
+        *,
+        cancel_event: Event | None = None,
     ) -> CourseSyncResult:
         def crawler_event(event: dict[str, Any]) -> None:
             self._emit(event_callback, "crawler_event", course=course, activity=event)
@@ -94,6 +137,7 @@ class SyncManager:
             max_depth=self.max_depth,
             follow_linked_courses=self.follow_linked_courses,
             event_callback=crawler_event,
+            cancel_event=cancel_event,
         )
         try:
             output = downloader.crawl_course(course.url, course.output_path, depth=0)
@@ -106,6 +150,8 @@ class SyncManager:
                 "success" if stats.get("downloaded", 0) else "up_to_date"
             )
             return self._result(course, name, Path(output), stats, status)
+        except SyncCancelled:
+            raise
         except Exception as exc:
             stats = dict(getattr(downloader, "stats", {}))
             stats["errors"] = max(1, int(stats.get("errors", 0)))

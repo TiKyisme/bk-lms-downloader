@@ -15,9 +15,11 @@ No Python or Git setup is needed for the normal GUI experience.
 2. Log in directly on the official BK-LMS website in Chrome.
 3. Add a course URL once, or click **Nhập từ BK-LMS** to choose courses from
    your enrolled-course list.
-4. Choose courses and click **Sync all** (or **Sync selected**).
-5. Run **Sync all** again later; existing unchanged files are skipped.
-6. To study with ChatGPT: tick one or more synced courses, choose **Công cụ →
+4. Choose courses and click **Đồng bộ tất cả** (or **Đồng bộ đã chọn**).
+5. The activity panel shows the current resource and elapsed time. Use **Hủy đồng bộ**
+   to stop safely; completed files stay in place.
+6. Run **Đồng bộ tất cả** again later; existing unchanged files are skipped.
+7. To study with ChatGPT: tick one or more synced courses, choose **Công cụ →
    Chuẩn bị đã chọn cho AI**, then upload the generated **AI Study Pack.zip** to
    ChatGPT and paste `CHATGPT_START_PROMPT.txt` from the pack.
 
@@ -34,7 +36,8 @@ files or folders on your computer.
 - Chrome-based login without password fields.
 - Saved courses, output-folder memory, manual add/edit, checked/all removal, and
   safe course import.
-- Sequential Sync selected / Sync all with one in-memory session per batch.
+- Sequential Sync selected / Sync all with one in-memory session per batch,
+  bounded resource timeouts, live activity, and safe cancellation.
 - Compact student-friendly folders: course info, lectures, labs, assignments,
   references, and other material.
 - Linked courses are flattened into the main course output; Lab sections stay grouped.

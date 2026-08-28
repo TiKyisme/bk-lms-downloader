@@ -50,6 +50,19 @@ if ($SelfTest.ExitCode -ne 0) {
     throw "Packaged AI Study Pack validation failed."
 }
 
+$SyncTest = Start-Process `
+    -FilePath $Exe `
+    -ArgumentList "--self-test-sync" `
+    -Wait `
+    -PassThru `
+    -WindowStyle Hidden
+if ($SyncTest.ExitCode -ne 0) {
+    if (Test-Path "sync-self-test-error.log") {
+        Get-Content "sync-self-test-error.log"
+    }
+    throw "Packaged sync timeout recovery validation failed."
+}
+
 Write-Host "" 
 Write-Host "Build OK:" -ForegroundColor Green
 Write-Host $Exe

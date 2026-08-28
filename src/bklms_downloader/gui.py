@@ -8,6 +8,7 @@ import tkinter as tk
 import webbrowser
 from datetime import datetime
 from pathlib import Path
+from time import monotonic
 from tkinter import filedialog, messagebox
 from typing import Callable
 
@@ -606,6 +607,8 @@ class App(ctk.CTk):
         self.store = CourseStore()
         self.settings = AppSettings()
         self.syncing = False
+        self.sync_cancel_event: threading.Event | None = None
+        self.sync_started_at: float | None = None
         self.update_info: UpdateInfo | None = None
         self.current_course_id: str | None = None
         self.course_rows: dict[str, CourseRow] = {}
@@ -619,12 +622,14 @@ class App(ctk.CTk):
         self.overall_var = tk.StringVar(value="Chưa có phiên đồng bộ")
         self.current_course_var = tk.StringVar(value="Sẵn sàng đồng bộ")
         self.summary_var = tk.StringVar(value="Chưa có kết quả đồng bộ.")
+        self.sync_elapsed_var = tk.StringVar(value="")
 
         self._build_ui()
         self._refresh_courses()
         self._set_login_status("Chưa đăng nhập", "idle")
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.after(120, self._drain_events)
+        self.after(1000, self._update_sync_elapsed)
         self._check_for_updates()
 
     def _create_icons(self) -> dict[str, ctk.CTkImage]:
@@ -889,6 +894,30 @@ class App(ctk.CTk):
             text_color=THEME.danger,
         )
         self.summary_errors.pack(side="left")
+        self.sync_elapsed_label = ctk.CTkLabel(
+            progress_area,
+            textvariable=self.sync_elapsed_var,
+            anchor="w",
+            font=(THEME.font_family, 12),
+            text_color=THEME.muted_text,
+        )
+        self.sync_elapsed_label.grid(row=3, column=0, sticky="w", pady=(8, 0))
+        self.cancel_sync_btn = ctk.CTkButton(
+            progress_area,
+            text="Hủy đồng bộ",
+            command=self._request_cancel_sync,
+            height=34,
+            width=132,
+            font=(THEME.font_family, 12, "bold"),
+            fg_color=THEME.surface,
+            hover_color=THEME.danger_soft,
+            text_color=THEME.danger,
+            border_color=THEME.danger,
+            border_width=1,
+            corner_radius=THEME.button_radius,
+            state="disabled",
+        )
+        self.cancel_sync_btn.grid(row=3, column=1, sticky="e", pady=(8, 0))
 
         log_area = ctk.CTkFrame(
             sync_card,
@@ -1391,6 +1420,9 @@ class App(ctk.CTk):
             )
             return
 
+        self.sync_cancel_event = threading.Event()
+        self.sync_started_at = monotonic()
+        self.sync_elapsed_var.set("Đã chạy 0:00")
         self._set_busy(True)
         self.progress_total = len(courses)
         self.progress.set(0)
@@ -1405,7 +1437,12 @@ class App(ctk.CTk):
                 wait_page(self.driver, extra=0.1)
                 session = make_session(self.driver)
                 manager = SyncManager(self.store)
-                manager.sync_courses(courses, session, self._emit_from_worker)
+                manager.sync_courses(
+                    courses,
+                    session,
+                    self._emit_from_worker,
+                    cancel_event=self.sync_cancel_event,
+                )
             except Exception as exc:
                 LOG.warning("Sync worker failed: %s", exc)
                 self.events.put({"event": "job_error"})
@@ -1427,6 +1464,30 @@ class App(ctk.CTk):
             self.sync_all_btn,
         ):
             button.configure(state=state)
+        self.cancel_sync_btn.configure(
+            state="normal" if busy and self.sync_cancel_event is not None else "disabled"
+        )
+
+    def _request_cancel_sync(self) -> None:
+        if not self.syncing or self.sync_cancel_event is None:
+            return
+        self.sync_cancel_event.set()
+        self.cancel_sync_btn.configure(state="disabled")
+        self.current_course_var.set("Đang hủy đồng bộ...")
+        self._set_summary_message("Đang hủy sau tài nguyên đang mở...")
+        self._log("[SYNC] Đã yêu cầu hủy đồng bộ an toàn.")
+
+    def _finish_sync_activity(self) -> None:
+        self.sync_cancel_event = None
+        self.sync_started_at = None
+        self.sync_elapsed_var.set("")
+
+    def _update_sync_elapsed(self) -> None:
+        if self.syncing and self.sync_started_at is not None:
+            elapsed = max(0, int(monotonic() - self.sync_started_at))
+            minutes, seconds = divmod(elapsed, 60)
+            self.sync_elapsed_var.set(f"Đã chạy {minutes}:{seconds:02d}")
+        self.after(1000, self._update_sync_elapsed)
 
     def _emit_from_worker(self, event: dict) -> None:
         self.events.put(event)
@@ -1497,6 +1558,9 @@ class App(ctk.CTk):
             self._log(f"[SYNC] {course.code or '-'} - {course.display_name}")
         elif kind == "crawler_event":
             self._handle_crawler_event(event["activity"])
+        elif kind == "sync_cancelled":
+            self.current_course_var.set("Đang hủy đồng bộ...")
+            self._log("[SYNC] Đang dừng sau tài nguyên hiện tại.")
         elif kind == "course_sync_complete":
             result = event["result"]
             self.progress.set(min(1, event["index"] / max(1, event["total"])))
@@ -1509,6 +1573,7 @@ class App(ctk.CTk):
         elif kind == "sync_all_complete":
             self._complete_sync(event["result"], event.get("total", 0))
         elif kind == "job_error":
+            self._finish_sync_activity()
             self._set_busy(False)
             self._set_login_status("Có lỗi", "error")
             self._set_summary_message("Không thể hoàn tất đồng bộ.")
@@ -1574,18 +1639,48 @@ class App(ctk.CTk):
             "page_saved": "[OK]",
             "file_skipped": "[SKIP]",
             "error": "[ERROR]",
+            "activity_processing": "[WORK]",
+            "resource_opening": "[OPEN]",
+            "file_downloading": "[DOWNLOAD]",
+            "download_progress": "[DOWNLOAD]",
+            "resource_retry": "[RETRY]",
+            "resource_timeout": "[TIMEOUT]",
+            "cancelled": "[CANCEL]",
         }
         if message and kind in prefixes:
+            if kind in {
+                "activity_processing",
+                "resource_opening",
+                "file_downloading",
+                "download_progress",
+                "resource_retry",
+                "resource_timeout",
+            }:
+                self.current_course_var.set(message)
             self._log(f"{prefixes[kind]} {message}")
 
     def _complete_sync(self, batch: SyncBatchResult, total: int) -> None:
+        self._finish_sync_activity()
         self._set_busy(False)
-        self.progress.set(1 if total else 0)
+        self.progress.set(1 if total and not batch.cancelled else min(1, len(batch.results) / max(1, total)))
         self.overall_var.set(f"{len(batch.results)} / {total} course")
-        self._set_summary_counts(batch.downloaded, batch.skipped, batch.errors)
         self._refresh_courses()
+        if not batch.cancelled:
+            self.current_course_var.set("Sẵn sàng đồng bộ")
 
-        if batch.authentication_error:
+        if batch.cancelled:
+            self.current_course_var.set("Đã hủy đồng bộ")
+            self._set_login_status("Đã đăng nhập BK-LMS", "success")
+            self._set_summary_message(
+                "Đã hủy đồng bộ. Các file đã tải xong được giữ nguyên."
+            )
+            messagebox.showinfo(
+                "Đã hủy đồng bộ",
+                "Đã hủy đồng bộ. Các file đã tải xong được giữ nguyên.",
+                parent=self,
+            )
+        elif batch.authentication_error:
+            self._set_summary_counts(batch.downloaded, batch.skipped, batch.errors)
             self._set_login_status("Phiên đăng nhập hết hạn", "error")
             messagebox.showwarning(
                 "Phiên đăng nhập hết hạn",
@@ -1595,6 +1690,12 @@ class App(ctk.CTk):
             )
         else:
             self._set_login_status("Đã đăng nhập BK-LMS", "success")
+            if batch.errors:
+                self._set_summary_message(
+                    f"Hoàn tất với {batch.errors} lỗi • {batch.downloaded} file mới • {batch.skipped} giữ nguyên"
+                )
+            else:
+                self._set_summary_counts(batch.downloaded, batch.skipped, batch.errors)
             messagebox.showinfo(
                 "Đồng bộ hoàn tất",
                 f"{batch.downloaded} file mới • {batch.skipped} giữ nguyên • {batch.errors} lỗi",
@@ -1609,6 +1710,8 @@ class App(ctk.CTk):
         self.log_text.configure(state="disabled")
 
     def _on_close(self) -> None:
+        if self.sync_cancel_event is not None:
+            self.sync_cancel_event.set()
         if self.driver is not None:
             try:
                 self.driver.quit()

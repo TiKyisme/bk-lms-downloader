@@ -21,6 +21,10 @@ if __name__ == "__main__":
         from bklms_downloader.ai_prepare import run_ai_runtime_self_test
 
         raise SystemExit(run_ai_runtime_self_test())
+    if "--self-test-sync" in sys.argv:
+        from bklms_downloader.sync_smoke import run_sync_runtime_self_test
+
+        raise SystemExit(run_sync_runtime_self_test())
     if "--diagnose-ai" in sys.argv:
         from bklms_downloader.ai_prepare import run_ai_runtime_diagnostics
 

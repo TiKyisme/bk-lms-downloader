@@ -109,6 +109,7 @@ class SyncBatchResult:
 
     results: list[CourseSyncResult]
     authentication_error: bool = False
+    cancelled: bool = False
 
     @property
     def downloaded(self) -> int:

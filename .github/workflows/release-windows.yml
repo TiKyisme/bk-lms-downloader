@@ -65,6 +65,22 @@ jobs:
             throw "Packaged AI Study Pack validation failed."
           }
 
+      - name: Validate packaged sync timeout recovery
+        shell: pwsh
+        run: |
+          $syncTest = Start-Process `
+            -FilePath ./dist/BK-LMS-Downloader.exe `
+            -ArgumentList "--self-test-sync" `
+            -Wait `
+            -PassThru `
+            -WindowStyle Hidden
+          if ($syncTest.ExitCode -ne 0) {
+            if (Test-Path "sync-self-test-error.log") {
+              Get-Content "sync-self-test-error.log"
+            }
+            throw "Packaged sync timeout recovery validation failed."
+          }
+
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:

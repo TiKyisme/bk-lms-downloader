@@ -4,6 +4,7 @@ import json
 import re
 import time
 from pathlib import Path
+from threading import Event
 from typing import Callable, Iterable, Optional
 from urllib.parse import urljoin, urlparse
 
@@ -12,10 +13,19 @@ from bs4 import BeautifulSoup
 
 from .config import (
     DEEP_MODS,
+    HTML_RESPONSE_DEADLINE,
     INTERACTIVE_MODS,
     MAX_REQUEST_ATTEMPTS,
+    REQUEST_CONNECT_TIMEOUT,
+    REQUEST_READ_TIMEOUT,
     REQUEST_RETRY_BACKOFF,
-    REQUEST_TIMEOUT,
+    RESOURCE_OPEN_DEADLINE,
+    STREAM_HEARTBEAT_INTERVAL,
+    STREAM_MAX_TOTAL_TIMEOUT,
+    STREAM_MIN_TOTAL_TIMEOUT,
+    STREAM_SECONDS_PER_MIB,
+    STREAM_UNKNOWN_TOTAL_TIMEOUT,
+    TITLE_LOOKUP_DEADLINE,
 )
 from .layout import bucket_name_for_section, context_prefix
 from .models import Section
@@ -43,6 +53,18 @@ from .utils import (
 EventCallback = Callable[[dict], None]
 
 
+class SyncCancelled(RuntimeError):
+    """Raised only for the cooperative, user-requested sync cancellation."""
+
+
+class ResourceTimeout(requests.Timeout):
+    """A bounded LMS resource deadline elapsed without completing the resource."""
+
+
+class AuthenticationError(RuntimeError):
+    """The copied Chrome session no longer reaches authenticated LMS content."""
+
+
 class DeepDownloader:
     """BK-LMS crawler with a deliberately shallow output layout.
 
@@ -58,6 +80,7 @@ class DeepDownloader:
         max_depth: int = 4,
         follow_linked_courses: bool = True,
         event_callback: Optional[EventCallback] = None,
+        cancel_event: Event | None = None,
     ):
         self.session = session
         self.output = output
@@ -65,6 +88,7 @@ class DeepDownloader:
         self.max_depth = max_depth
         self.follow_linked_courses = follow_linked_courses
         self.event_callback = event_callback
+        self.cancel_event = cancel_event
 
         self.visited: set[str] = set()
         self.course_visited: set[str] = set()
@@ -98,37 +122,156 @@ class DeepDownloader:
             detail = record.get("error") or record.get("source") or "Unknown error"
             self.emit("error", f"Lỗi: {detail}", **record)
 
-    def fetch(self, url: str, stream: bool = True) -> requests.Response:
-        for attempt in range(MAX_REQUEST_ATTEMPTS):
+    def _check_cancelled(self) -> None:
+        if self.cancel_event is not None and self.cancel_event.is_set():
+            raise SyncCancelled("Đã hủy đồng bộ.")
+
+    @staticmethod
+    def _resource_name(resource_name: str | None) -> str:
+        return clean_text(resource_name or "") or "tài nguyên BK-LMS"
+
+    def _timeout_error(self, resource_name: str | None) -> ResourceTimeout:
+        name = self._resource_name(resource_name)
+        self.emit(
+            "resource_timeout",
+            f"Quá thời gian chờ, đã bỏ qua: {name}",
+            resource_name=name,
+        )
+        return ResourceTimeout(f"Quá thời gian chờ: {name}")
+
+    def _wait_for_retry(self, delay: float) -> None:
+        if self.cancel_event is None:
+            time.sleep(delay)
+        elif self.cancel_event.wait(delay):
+            self._check_cancelled()
+
+    @staticmethod
+    def _retryable(exc: requests.RequestException, status_code: int) -> bool:
+        if isinstance(exc, (requests.ConnectionError, requests.Timeout)):
+            return True
+        return isinstance(exc, requests.HTTPError) and (
+            status_code == 408 or status_code == 429 or status_code >= 500
+        )
+
+    def fetch(
+        self,
+        url: str,
+        stream: bool = True,
+        *,
+        resource_name: str | None = None,
+        max_attempts: int = MAX_REQUEST_ATTEMPTS,
+        deadline_seconds: float = RESOURCE_OPEN_DEADLINE,
+    ) -> requests.Response:
+        """Open one resource with capped retries and separate socket timeouts.
+
+        ``requests`` only applies its timeout to inactivity on an individual
+        socket operation.  The monotonic deadline here additionally caps the
+        whole opening/retry phase, while file and HTML bodies are bounded by
+        their dedicated readers below.
+        """
+        del stream  # Bodies are always read explicitly below so they are bounded too.
+        name = self._resource_name(resource_name)
+        attempts = max(1, min(MAX_REQUEST_ATTEMPTS, max_attempts))
+        deadline = time.monotonic() + deadline_seconds
+        self._check_cancelled()
+        self.emit("resource_opening", f"Đang mở: {name}", resource_name=name)
+
+        for attempt in range(attempts):
             response: Optional[requests.Response] = None
             try:
+                self._check_cancelled()
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise self._timeout_error(name)
                 response = self.session.get(
                     url,
-                    stream=stream,
+                    stream=True,
                     allow_redirects=True,
-                    timeout=REQUEST_TIMEOUT,
+                    timeout=(
+                        min(REQUEST_CONNECT_TIMEOUT, max(1, remaining)),
+                        min(REQUEST_READ_TIMEOUT, max(1, remaining)),
+                    ),
                 )
                 response.raise_for_status()
+                if "/login/" in urlparse(response.url).path.lower():
+                    response.close()
+                    raise AuthenticationError(
+                        "Phiên đăng nhập BK-LMS chưa hợp lệ hoặc đã hết hạn. "
+                        "Hãy đăng nhập lại trong Chrome."
+                    )
                 return response
+            except SyncCancelled:
+                if response is not None:
+                    response.close()
+                raise
+            except AuthenticationError:
+                raise
+            except ResourceTimeout:
+                if response is not None:
+                    response.close()
+                raise
             except requests.RequestException as exc:
                 status_code = getattr(response, "status_code", 0) if response is not None else 0
                 if response is not None:
                     response.close()
-                retryable = (
-                    isinstance(exc, (requests.ConnectionError, requests.Timeout))
-                    or (isinstance(exc, requests.HTTPError) and status_code >= 500)
-                ) and not isinstance(
-                    exc,
-                    (
-                        requests.exceptions.InvalidURL,
-                        requests.exceptions.MissingSchema,
-                        requests.exceptions.InvalidSchema,
-                    ),
-                )
-                if not retryable or attempt == MAX_REQUEST_ATTEMPTS - 1:
+                retryable = self._retryable(exc, status_code)
+                if not retryable or attempt == attempts - 1:
+                    if isinstance(exc, requests.Timeout):
+                        raise self._timeout_error(name) from exc
                     raise
-                time.sleep(REQUEST_RETRY_BACKOFF * (2**attempt))
-        raise RuntimeError("Không thể tải tài nguyên BK-LMS.")
+                delay = REQUEST_RETRY_BACKOFF * (2**attempt)
+                if time.monotonic() + delay >= deadline:
+                    raise self._timeout_error(name) from exc
+                self.emit(
+                    "resource_retry",
+                    f"Thử lại {attempt + 2}/{attempts}: {name}",
+                    resource_name=name,
+                    attempt=attempt + 2,
+                    attempts=attempts,
+                )
+                self._wait_for_retry(delay)
+        raise self._timeout_error(name)
+
+    def read_response_bytes(
+        self,
+        response: requests.Response,
+        resource_name: str | None,
+    ) -> bytes:
+        """Read an HTML-style response under a short absolute body deadline."""
+        name = self._resource_name(resource_name)
+        deadline = time.monotonic() + HTML_RESPONSE_DEADLINE
+        chunks: list[bytes] = []
+        for chunk in response.iter_content(64 * 1024):
+            self._check_cancelled()
+            if time.monotonic() > deadline:
+                raise self._timeout_error(name)
+            if chunk:
+                chunks.append(chunk)
+        self._check_cancelled()
+        if time.monotonic() > deadline:
+            raise self._timeout_error(name)
+        return b"".join(chunks)
+
+    def read_response_text(
+        self,
+        response: requests.Response,
+        resource_name: str | None,
+    ) -> str:
+        return self.read_response_bytes(response, resource_name).decode(
+            response.encoding or "utf-8",
+            errors="replace",
+        )
+
+    @staticmethod
+    def _stream_total_timeout(response: requests.Response) -> float:
+        size_raw = response.headers.get("Content-Length", "")
+        if not size_raw.isdigit():
+            return STREAM_UNKNOWN_TOTAL_TIMEOUT
+        size_mib = int(size_raw) / (1024 * 1024)
+        return min(
+            STREAM_MAX_TOTAL_TIMEOUT,
+            max(STREAM_MIN_TOTAL_TIMEOUT, size_mib * STREAM_SECONDS_PER_MIB),
+        )
 
     def _bucket_dir(self, section_title: str) -> Path:
         if self.root_course_dir is None:
@@ -195,12 +338,40 @@ class DeepDownloader:
                 response.close()
                 return target
 
+        self._check_cancelled()
         temp = target.with_suffix(target.suffix + ".part")
+        deadline = time.monotonic() + self._stream_total_timeout(response)
+        last_heartbeat = time.monotonic()
+        bytes_written = 0
+        self.emit(
+            "file_downloading",
+            f"Đang tải: {filename}",
+            filename=filename,
+            resource_name=filename,
+        )
         try:
             with temp.open("wb") as file_obj:
                 for chunk in response.iter_content(256 * 1024):
+                    self._check_cancelled()
+                    now = time.monotonic()
+                    if now > deadline:
+                        raise self._timeout_error(filename)
                     if chunk:
                         file_obj.write(chunk)
+                        bytes_written += len(chunk)
+                    if now - last_heartbeat >= STREAM_HEARTBEAT_INTERVAL:
+                        self.emit(
+                            "download_progress",
+                            f"Đang tải: {filename}",
+                            filename=filename,
+                            bytes_written=bytes_written,
+                            resource_name=filename,
+                        )
+                        last_heartbeat = now
+
+            self._check_cancelled()
+            if time.monotonic() > deadline:
+                raise self._timeout_error(filename)
 
             if target.exists():
                 target.unlink()
@@ -224,19 +395,20 @@ class DeepDownloader:
                 size=size,
             )
             return target
-        except Exception as exc:
+        except SyncCancelled:
             if temp.exists():
                 try:
                     temp.unlink()
-                except Exception:
+                except OSError:
                     pass
-            self.stats["errors"] += 1
-            self.log(
-                status="error",
-                context=context,
-                source=source,
-                error=str(exc),
-            )
+            self.emit("cancelled", f"Đã hủy: {filename}", filename=filename)
+            raise
+        except Exception:
+            if temp.exists():
+                try:
+                    temp.unlink()
+                except OSError:
+                    pass
             raise
         finally:
             response.close()
@@ -252,6 +424,7 @@ class DeepDownloader:
         index = 0
 
         for label, url in media_links:
+            self._check_cancelled()
             url = normalize_url(url)
             if url in seen:
                 continue
@@ -270,7 +443,7 @@ class DeepDownloader:
 
             index += 1
             try:
-                response = self.fetch(url)
+                response = self.fetch(url, resource_name=label or "tệp đính kèm")
                 if html_response(response):
                     print(f"    [INFO] Media trả HTML, bỏ qua: {url}")
                     response.close()
@@ -285,6 +458,10 @@ class DeepDownloader:
                     context,
                     prefix=media_prefix,
                 )
+            except SyncCancelled:
+                raise
+            except AuthenticationError:
+                raise
             except Exception as exc:
                 print(f"    [ERR] asset {url}: {exc}")
                 self.stats["errors"] += 1
@@ -380,6 +557,7 @@ class DeepDownloader:
         context: str,
         prefix: str,
     ) -> None:
+        self._check_cancelled()
         url = normalize_url(url)
         if depth > self.max_depth:
             print(f"    [DEPTH] Bỏ qua vì vượt max-depth: {url}")
@@ -407,7 +585,11 @@ class DeepDownloader:
             return
 
         try:
-            response = self.fetch(url)
+            response = self.fetch(url, resource_name=title)
+        except SyncCancelled:
+            raise
+        except AuthenticationError:
+            raise
         except Exception as exc:
             print(f"    [ERR] {url}: {exc}")
             self.stats["errors"] += 1
@@ -433,14 +615,27 @@ class DeepDownloader:
             return
 
         if not html_response(response):
-            self.save_response_file(
-                response,
-                dest_dir,
-                title,
-                url,
-                context,
-                prefix=prefix,
-            )
+            try:
+                self.save_response_file(
+                    response,
+                    dest_dir,
+                    title,
+                    url,
+                    context,
+                    prefix=prefix,
+                )
+            except SyncCancelled:
+                raise
+            except Exception as exc:
+                # The transfer removes its temporary file before raising.  Log
+                # this one resource once and continue with sibling links.
+                self.stats["errors"] += 1
+                self.log(
+                    status="error",
+                    context=context,
+                    source=url,
+                    error=str(exc),
+                )
             return
 
         if not is_same_lms(final_url):
@@ -448,12 +643,18 @@ class DeepDownloader:
             return
 
         try:
-            html = response.content.decode(
-                response.encoding or "utf-8",
-                errors="replace",
+            html = self.read_response_text(response, title)
+        except SyncCancelled:
+            raise
+        except Exception as exc:
+            self.stats["errors"] += 1
+            self.log(
+                status="error",
+                context=context,
+                source=url,
+                error=str(exc),
             )
-        except Exception:
-            html = response.text
+            return
         finally:
             response.close()
 
@@ -496,11 +697,12 @@ class DeepDownloader:
                 filtered.append(link)
 
         for index, link in enumerate(filtered, start=1):
+            self._check_cancelled()
             link_type = activity_type(link)
 
             if link_type == "pluginfile" or is_probably_file_url(link):
                 try:
-                    file_response = self.fetch(link)
+                    file_response = self.fetch(link, resource_name=f"{title} — tệp đính kèm")
                     if html_response(file_response):
                         file_response.close()
                         continue
@@ -512,6 +714,10 @@ class DeepDownloader:
                         context,
                         prefix=f"{prefix}{index:02d} - ",
                     )
+                except SyncCancelled:
+                    raise
+                except AuthenticationError:
+                    raise
                 except Exception as exc:
                     print(f"    [ERR] nested file {link}: {exc}")
                     self.stats["errors"] += 1
@@ -530,23 +736,42 @@ class DeepDownloader:
                 if prefix
                 else f"{safe_name(nested_name, 70)} - "
             )
-            self.crawl_moodle_link(
-                link,
-                dest_dir,
-                nested_name,
-                depth + 1,
-                context,
-                nested_prefix,
-            )
+            try:
+                self.crawl_moodle_link(
+                    link,
+                    dest_dir,
+                    nested_name,
+                    depth + 1,
+                    context,
+                    nested_prefix,
+                )
+            except SyncCancelled:
+                raise
+            except AuthenticationError:
+                raise
+            except Exception as exc:
+                self.stats["errors"] += 1
+                self.log(
+                    status="error",
+                    context=context,
+                    source=link,
+                    error=str(exc),
+                )
 
     def link_title(self, url: str) -> Optional[str]:
         response: Optional[requests.Response] = None
         try:
-            response = self.fetch(url, stream=False)
+            response = self.fetch(
+                url,
+                stream=False,
+                resource_name="liên kết",
+                max_attempts=1,
+                deadline_seconds=TITLE_LOOKUP_DEADLINE,
+            )
             if not html_response(response):
                 return None
 
-            soup = BeautifulSoup(response.text, "html.parser")
+            soup = BeautifulSoup(self.read_response_text(response, "liên kết"), "html.parser")
             for selector in (
                 ".page-header-headings h1",
                 "#region-main h2",
@@ -565,6 +790,10 @@ class DeepDownloader:
                     )
                     if text:
                         return text
+        except SyncCancelled:
+            raise
+        except AuthenticationError:
+            raise
         except Exception:
             return None
         finally:
@@ -578,6 +807,7 @@ class DeepDownloader:
         dest_dir: Path,
         course_url: str,
     ) -> None:
+        self._check_cancelled()
         html_doc, media_links, _ = extract_section_content(
             section.node_html,
             course_url,
@@ -615,6 +845,7 @@ class DeepDownloader:
         depth: int = 0,
         linked_title: Optional[str] = None,
     ) -> Optional[Path]:
+        self._check_cancelled()
         course_url = normalize_url(course_url)
 
         if course_url in self.course_visited:
@@ -633,7 +864,15 @@ class DeepDownloader:
         print("#" * 78)
 
         try:
-            page = self.fetch(course_url, stream=False)
+            page = self.fetch(
+                course_url,
+                stream=False,
+                resource_name=linked_title or "trang khóa học",
+            )
+        except SyncCancelled:
+            raise
+        except AuthenticationError:
+            raise
         except Exception as exc:
             print(f"[ERR] Không mở được course: {exc}")
             self.stats["errors"] += 1
@@ -645,37 +884,43 @@ class DeepDownloader:
             )
             return None
 
-        final_path = urlparse(page.url).path.lower()
-        if "/login/" in final_path:
-            message = (
-                "Phiên đăng nhập BK-LMS chưa hợp lệ hoặc đã hết hạn. "
-                "Hãy đăng nhập lại trong Chrome."
-            )
-            self.stats["errors"] += 1
-            self.log(
-                status="error",
-                context="course",
-                source=course_url,
-                error=message,
-            )
-            if depth == 0:
-                raise RuntimeError(message)
-            return None
+        try:
+            final_path = urlparse(page.url).path.lower()
+            if "/login/" in final_path:
+                message = (
+                    "Phiên đăng nhập BK-LMS chưa hợp lệ hoặc đã hết hạn. "
+                    "Hãy đăng nhập lại trong Chrome."
+                )
+                self.stats["errors"] += 1
+                self.log(
+                    status="error",
+                    context="course",
+                    source=course_url,
+                    error=message,
+                )
+                if depth == 0:
+                    raise RuntimeError(message)
+                return None
 
-        if not html_response(page):
-            message = "Course URL không trả về trang HTML của BK-LMS."
-            self.stats["errors"] += 1
-            self.log(
-                status="error",
-                context="course",
-                source=course_url,
-                error=message,
-            )
-            if depth == 0:
-                raise RuntimeError(message)
-            return None
+            if not html_response(page):
+                message = "Course URL không trả về trang HTML của BK-LMS."
+                self.stats["errors"] += 1
+                self.log(
+                    status="error",
+                    context="course",
+                    source=course_url,
+                    error=message,
+                )
+                if depth == 0:
+                    raise RuntimeError(message)
+                return None
 
-        course_name, sections = parse_sections(page.text, page.url)
+            course_name, sections = parse_sections(
+                self.read_response_text(page, linked_title or "trang khóa học"),
+                page.url,
+            )
+        finally:
+            page.close()
 
         if depth == 0:
             course_dir = parent_dir / safe_name(course_name, 150)
@@ -720,6 +965,7 @@ class DeepDownloader:
         self.course_structures.append(structure)
 
         for section in sections:
+            self._check_cancelled()
             bucket_dir = self._bucket_dir(section.title)
 
             self.emit(
@@ -745,6 +991,7 @@ class DeepDownloader:
             )
 
             for activity in section.activities:
+                self._check_cancelled()
                 mod = activity.mod_type
                 context = (
                     f"{course_name} > {section.title} > {activity.name}"
@@ -756,6 +1003,12 @@ class DeepDownloader:
                 )
 
                 print(f"\n  [{mod}] {activity.name}")
+                self.emit(
+                    "activity_processing",
+                    f"Đang xử lý: {activity.name}",
+                    activity_name=activity.name,
+                    section_title=section.title,
+                )
 
                 if mod in INTERACTIVE_MODS:
                     self.emit(
@@ -766,7 +1019,10 @@ class DeepDownloader:
 
                 if mod == "resource" or mod == "pluginfile":
                     try:
-                        response = self.fetch(activity.url)
+                        response = self.fetch(
+                            activity.url,
+                            resource_name=activity.name,
+                        )
                         if not html_response(response):
                             self.save_response_file(
                                 response,
@@ -786,6 +1042,10 @@ class DeepDownloader:
                                 context,
                                 activity_prefix,
                             )
+                    except SyncCancelled:
+                        raise
+                    except AuthenticationError:
+                        raise
                     except Exception as exc:
                         print(f"    [ERR] {exc}")
                         self.stats["errors"] += 1
@@ -797,14 +1057,27 @@ class DeepDownloader:
                         )
                     continue
 
-                self.crawl_moodle_link(
-                    activity.url,
-                    bucket_dir,
-                    activity.name,
-                    depth + 1,
-                    context,
-                    activity_prefix,
-                )
+                try:
+                    self.crawl_moodle_link(
+                        activity.url,
+                        bucket_dir,
+                        activity.name,
+                        depth + 1,
+                        context,
+                        activity_prefix,
+                    )
+                except SyncCancelled:
+                    raise
+                except AuthenticationError:
+                    raise
+                except Exception as exc:
+                    self.stats["errors"] += 1
+                    self.log(
+                        status="error",
+                        context=activity.name,
+                        source=activity.url,
+                        error=str(exc),
+                    )
 
         if depth == 0:
             meta_dir = self._meta_dir()
