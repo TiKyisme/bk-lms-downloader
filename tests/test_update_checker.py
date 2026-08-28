@@ -55,8 +55,16 @@ def test_no_update_for_current_or_older_release():
     assert checker.check() is None
 
 
-def test_newer_stable_release_returns_structured_update():
-    checker = UpdateChecker("0.4.0", session=FakeSession(FakeResponse([release("v0.4.1")])))
+def test_newer_stable_release_returns_structured_update(monkeypatch):
+    monkeypatch.setattr(
+        "bklms_downloader.update_checker.preferred_release_asset_names",
+        lambda **_kwargs: ("BK-LMS-Downloader.exe",),
+    )
+
+    checker = UpdateChecker(
+        "0.4.0",
+        session=FakeSession(FakeResponse([release("v0.4.1")])),
+    )
 
     update = checker.check()
 
