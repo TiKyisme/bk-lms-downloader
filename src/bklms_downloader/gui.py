@@ -28,6 +28,7 @@ from .course_discovery import (
 )
 from .course_store import CourseStore
 from .models import Course, SyncBatchResult, checked_courses
+from .scroll_routing import WheelBindingRegistry, choose_scroll_route
 from .sync_manager import SyncManager
 from .ui_icons import icon
 from .ui_theme import THEME
@@ -269,6 +270,7 @@ class ImportCoursesDialog(ctk.CTkToplevel):
             border_width=1,
         )
         scroll.grid(row=1, column=0, sticky="nsew", padx=18, pady=(28, 10))
+        self._scroll_owner = self.parent_app._register_modal_scroll_region(self, scroll)
         scroll.grid_columnconfigure(2, weight=1)
         for index, course in enumerate(self.courses):
             available = course.url in self.available_urls
@@ -355,6 +357,12 @@ class ImportCoursesDialog(ctk.CTkToplevel):
             return
         self.on_add(selected)
         self.destroy()
+
+    def destroy(self) -> None:
+        owner = getattr(self, "_scroll_owner", "")
+        if owner:
+            self.parent_app._unregister_scroll_region(owner)
+        super().destroy()
 
 
 class DeleteConfirmationDialog(ctk.CTkToplevel):
@@ -614,6 +622,10 @@ class App(ctk.CTk):
         self.course_rows: dict[str, CourseRow] = {}
         self.progress_total = 1
         self.icons = self._create_icons()
+        self._wheel_bindings = WheelBindingRegistry()
+        self._scroll_regions: dict[str, object] = {}
+        self._wheel_remainders: dict[str, float] = {}
+        self._activity_text_widget = None
 
         self.login_status_var = tk.StringVar(value="Chưa đăng nhập")
         self.course_detail_var = tk.StringVar(
@@ -625,6 +637,10 @@ class App(ctk.CTk):
         self.sync_elapsed_var = tk.StringVar(value="")
 
         self._build_ui()
+        self._register_scroll_region("courses", self.course_scroll)
+        self._register_scroll_region("activity", self.log_text)
+        self._register_scroll_region("main", self.main_scroll)
+        self._install_wheel_router()
         self._refresh_courses()
         self._set_login_status("Chưa đăng nhập", "idle")
         self.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -664,6 +680,121 @@ class App(ctk.CTk):
             font=(THEME.font_family, 12),
             text_color=THEME.muted_text,
         ).grid(row=3, column=0, sticky="w", padx=24, pady=(0, 16))
+
+    def _register_scroll_region(self, owner: str, widget: object) -> str:
+        self._scroll_regions[owner] = widget
+        return owner
+
+    def _register_modal_scroll_region(self, dialog: ctk.CTkToplevel, widget: object) -> str:
+        return self._register_scroll_region(f"modal:{id(dialog)}", widget)
+
+    def _unregister_scroll_region(self, owner: str) -> None:
+        self._scroll_regions.pop(owner, None)
+        self._wheel_remainders.pop(owner, None)
+
+    @staticmethod
+    def _scroll_region_roots(widget: object) -> tuple[object, ...]:
+        """Return every visible surface of a CTk scroll region.
+
+        CustomTkinter exposes a scrollable frame as a content frame placed in a
+        private canvas.  The small adapter keeps that implementation detail in
+        one place so the routing decision itself only uses normal Tk ancestry.
+        """
+        roots = [widget]
+        if isinstance(widget, ctk.CTkScrollableFrame):
+            for attribute in ("_parent_frame", "_parent_canvas", "_scrollbar", "_label"):
+                surface = getattr(widget, attribute, None)
+                if surface is not None:
+                    roots.append(surface)
+        return tuple(roots)
+
+    def _install_wheel_router(self) -> None:
+        self._wheel_bindings.install_once(self, self._on_global_wheel)
+        # CTkTextbox forwards ``bind`` to its actual Tk Text widget.  Binding
+        # there once lets us consume the event before the Text class bindtag,
+        # rather than relying on bind_all ordering.
+        self._activity_text_widget = getattr(self.log_text, "_textbox", None)
+        for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            self.log_text.bind(sequence, self._on_activity_text_wheel)
+
+    def _on_global_wheel(self, event):
+        return self._route_wheel(event)
+
+    def _on_activity_text_wheel(self, event):
+        return self._route_wheel(event, forced_owner="activity", manual=True)
+
+    def _route_wheel(self, event, *, forced_owner: str | None = None, manual: bool = False):
+        widget = getattr(event, "widget", None)
+        owner = forced_owner
+        if owner is None:
+            regions = [
+                (name, self._scroll_region_roots(region))
+                for name, region in self._scroll_regions.items()
+            ]
+            try:
+                is_main_window = widget.winfo_toplevel() is self
+            except Exception:
+                is_main_window = False
+            route = choose_scroll_route(
+                widget,
+                regions,
+                fallback_owner="main" if is_main_window else None,
+            )
+            owner = route.owner
+            if owner is None:
+                # A modal grab must never allow wheel input to reach the main
+                # page behind it, even outside the modal's own list viewport.
+                return "break" if widget is not None else None
+
+        target = self._scroll_regions.get(owner)
+        if target is None:
+            return "break"
+
+        # The direct Text binding below runs before the Tk Text class binding,
+        # so it scrolls manually.  If a future widget bypasses that binding,
+        # avoid double-scrolling the native Text class before the all bindtag.
+        if owner == "activity" and widget is self._activity_text_widget and not manual:
+            return "break"
+
+        units = self._wheel_units(owner, event)
+        if units:
+            self._scroll_region(target, units)
+        # Consumption is unconditional for a child, including at its boundary.
+        return "break"
+
+    def _wheel_units(self, owner: str, event) -> int:
+        number = getattr(event, "num", None)
+        if number == 4:
+            return -3
+        if number == 5:
+            return 3
+
+        try:
+            delta = float(getattr(event, "delta", 0) or 0)
+        except (TypeError, ValueError):
+            return 0
+        if delta == 0:
+            return 0
+
+        total = self._wheel_remainders.get(owner, 0.0) - (delta / 6.0)
+        # Tk precision touchpads may deliver deltas smaller than one canvas
+        # unit.  A tiny direction-aware epsilon avoids six 1-point deltas
+        # being stranded at -0.999999 due to binary floating point.
+        units = int(total + 1e-9) if total >= 0 else int(total - 1e-9)
+        self._wheel_remainders[owner] = total - units
+        return units
+
+    @staticmethod
+    def _scroll_region(target: object, units: int) -> None:
+        try:
+            if isinstance(target, ctk.CTkScrollableFrame):
+                target._parent_canvas.yview_scroll(units, "units")
+            else:
+                target.yview_scroll(units, "units")
+        except Exception:
+            # A destroyed modal can still have one queued wheel event; it is
+            # safer to consume that event than to leak it to the main page.
+            pass
 
     def _build_top_area(self) -> None:
         top = ctk.CTkFrame(self.main_scroll, fg_color="transparent")

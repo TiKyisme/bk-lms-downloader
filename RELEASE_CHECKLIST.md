@@ -1,4 +1,4 @@
-# BK-LMS Downloader v1.0.8 release checklist
+# BK-LMS Downloader v1.0.9 release checklist
 
 Complete this manual checklist before creating the public tag.
 
@@ -12,6 +12,10 @@ Complete this manual checklist before creating the public tag.
 - [ ] Manual Add Course works and remembers the output folder.
 - [ ] Sync selected works.
 - [ ] Sync all works sequentially.
+- [ ] Hovering My Courses scrolls only its list, including at top/bottom boundaries.
+- [ ] Hovering Recent Activity scrolls only its log, including at top/bottom boundaries.
+- [ ] Hovering normal page areas scrolls the main page; modal import scrolling never moves the page behind it.
+- [ ] Repeated refresh/import/sync does not increase mouse-wheel speed or duplicate handlers.
 - [ ] The activity panel shows the current opening/download/processing step and elapsed time.
 - [ ] A timed-out resource is reported as skipped and later resources/courses still run.
 - [ ] **Hủy đồng bộ** stops safely, restores controls, removes active `.part` files where possible, and keeps completed files.
@@ -32,6 +36,7 @@ Complete this manual checklist before creating the public tag.
 - [ ] Packaged EXE requires no Python or pip installation for AI preparation.
 - [ ] Packaged `BK-LMS-Downloader.exe --self-test-ai` exits successfully.
 - [ ] Packaged `BK-LMS-Downloader.exe --self-test-sync` proves normal → timeout skipped → normal recovery.
+- [ ] Packaged `BK-LMS-Downloader.exe --self-test-scroll` validates nested wheel ownership with synthetic courses and activity.
 - [ ] Packaged `BK-LMS-Downloader.exe --diagnose-ai` reports all AI imports and synthetic batch success.
 - [ ] AI Study Pack accounts for every discovered source.
 - [ ] Chapter/module detection works for `Ch1`, `Ch 2`, `Ch3_4`, and `Chapter 3-4`.
@@ -44,4 +49,4 @@ Complete this manual checklist before creating the public tag.
 - [ ] GUI has no obsolete current-course Delete or AI modes at common laptop sizes.
 - [ ] No credentials, cookies, or session material are present in repository files or logs.
 - [ ] README screenshot and download instructions are current.
-- [ ] Create `v1.0.8` only after all above smoke tests pass.
+- [ ] Create `v1.0.9` only after all above smoke tests pass.

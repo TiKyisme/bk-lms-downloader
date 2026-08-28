@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.9 - 2026-08-28
+
+- Route nested mouse-wheel input centrally so My Courses, Recent Activity, and
+  the import-course modal retain exclusive scroll ownership while hovered.
+- Prevent main-page scroll chaining at child top/bottom boundaries; preserve
+  Windows precision-wheel deltas, Linux wheel buttons, native scrollbars, and
+  normal main-page scrolling outside child regions.
+- Add deterministic routing tests plus a synthetic GUI smoke that verifies
+  courses, activity, main page, and modal scrolling without user course data.
+
 ## 1.0.8 - 2026-08-28
 
 - Bound crawler opening/retry work with separate connect/read timeouts and a

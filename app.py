@@ -25,6 +25,10 @@ if __name__ == "__main__":
         from bklms_downloader.sync_smoke import run_sync_runtime_self_test
 
         raise SystemExit(run_sync_runtime_self_test())
+    if "--self-test-scroll" in sys.argv:
+        from bklms_downloader.scroll_smoke import run_scroll_runtime_self_test
+
+        raise SystemExit(run_scroll_runtime_self_test())
     if "--diagnose-ai" in sys.argv:
         from bklms_downloader.ai_prepare import run_ai_runtime_diagnostics
 

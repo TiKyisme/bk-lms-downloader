@@ -38,6 +38,8 @@ files or folders on your computer.
   safe course import.
 - Sequential Sync selected / Sync all with one in-memory session per batch,
   bounded resource timeouts, live activity, and safe cancellation.
+- Independent My Courses and Recent Activity scrolling without moving the main
+  page while the pointer is inside either panel.
 - Compact student-friendly folders: course info, lectures, labs, assignments,
   references, and other material.
 - Linked courses are flattened into the main course output; Lab sections stay grouped.
