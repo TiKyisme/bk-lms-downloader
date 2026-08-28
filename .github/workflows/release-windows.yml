@@ -1,4 +1,4 @@
-name: build-windows-release
+name: build-release
 
 on:
   push:
@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  build-windows:
     runs-on: windows-latest
 
     steps:
@@ -30,7 +30,7 @@ jobs:
       - name: Run tests
         run: pytest
 
-      - name: Build EXE
+      - name: Build Windows EXE
         shell: pwsh
         run: |
           python -m PyInstaller `
@@ -81,15 +81,73 @@ jobs:
             throw "Packaged sync timeout recovery validation failed."
           }
 
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: BK-LMS-Downloader-Windows
-          path: dist/BK-LMS-Downloader.exe
+      - name: Prepare Windows release asset
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force release-assets | Out-Null
+          Copy-Item dist/BK-LMS-Downloader.exe release-assets/BK-LMS-Downloader-Windows.exe
 
-      - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: release-assets/BK-LMS-Downloader-Windows.exe
+
+  build-macos-arm64:
+    runs-on: macos-14
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Build Apple Silicon DMG
+        run: |
+          chmod +x scripts/build_macos.sh
+          scripts/build_macos.sh arm64
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-macos-arm64
+          path: dist/BK-LMS-Downloader-macOS-arm64.dmg
+
+  build-macos-x64:
+    runs-on: macos-15-intel
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Build Intel Mac DMG
+        run: |
+          chmod +x scripts/build_macos.sh
+          scripts/build_macos.sh x64
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-macos-x64
+          path: dist/BK-LMS-Downloader-macOS-x64.dmg
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [build-windows, build-macos-arm64, build-macos-x64]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Create one GitHub Release with all platform assets
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          files: dist/BK-LMS-Downloader.exe
+          files: release-assets/*

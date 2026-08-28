@@ -5,6 +5,8 @@ from typing import Any
 
 import requests
 
+from .platform_support import preferred_release_asset_names
+
 
 GITHUB_RELEASES_API = "https://api.github.com/repos/TiKyisme/bk-lms-downloader/releases"
 UPDATE_TIMEOUT = 5
@@ -79,7 +81,7 @@ class UpdateChecker:
             current_version=self.current_version,
             latest_version=tag.lstrip("vV"),
             release_url=release_url,
-            download_url=self._exe_download_url(latest),
+            download_url=self._platform_download_url(latest),
             release_notes=str(latest.get("body", "")).strip(),
             update_available=True,
         )
@@ -102,15 +104,25 @@ class UpdateChecker:
         return max(stable, key=lambda release: parse_version(str(release["tag_name"])) or (0, 0, 0))
 
     @staticmethod
-    def _exe_download_url(release: dict[str, Any]) -> str | None:
+    def _platform_download_url(
+        release: dict[str, Any],
+        *,
+        platform_name: str | None = None,
+        machine: str | None = None,
+    ) -> str | None:
         assets = release.get("assets", [])
         if not isinstance(assets, list):
             return None
-        for asset in assets:
-            if not isinstance(asset, dict):
-                continue
-            name = str(asset.get("name", "")).lower()
-            url = str(asset.get("browser_download_url", "")).strip()
-            if name.endswith(".exe") and url:
+        urls = {
+            str(asset.get("name", "")).casefold(): str(asset.get("browser_download_url", "")).strip()
+            for asset in assets
+            if isinstance(asset, dict)
+        }
+        for name in preferred_release_asset_names(
+            platform_name=platform_name,
+            machine=machine,
+        ):
+            url = urls.get(name.casefold())
+            if url:
                 return url
         return None

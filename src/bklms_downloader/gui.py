@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import os
 import queue
-import subprocess
 import threading
 import tkinter as tk
 import webbrowser
@@ -28,6 +26,7 @@ from .course_discovery import (
 )
 from .course_store import CourseStore
 from .models import Course, SyncBatchResult, checked_courses
+from .platform_support import open_in_file_manager
 from .scroll_routing import WheelBindingRegistry, choose_scroll_route
 from .sync_manager import SyncManager
 from .ui_icons import icon
@@ -1376,10 +1375,7 @@ class App(ctk.CTk):
             messagebox.showwarning("Thư mục", "Chưa tìm thấy thư mục kết quả.", parent=self)
             return
         try:
-            if os.name == "nt":
-                os.startfile(path)  # type: ignore[attr-defined]
-            elif os.name == "posix":
-                subprocess.Popen(["xdg-open", str(path)])
+            open_in_file_manager(path)
         except Exception as exc:
             LOG.warning("Could not open output folder: %s", exc)
             messagebox.showerror("Mở thư mục", "Không thể mở thư mục đã chọn.", parent=self)

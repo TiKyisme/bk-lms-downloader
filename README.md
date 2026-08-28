@@ -1,12 +1,21 @@
 # BK-LMS Downloader
 
-A small Windows utility for HCMUT students to download and keep BK-LMS course
+A desktop utility for HCMUT students to download and keep BK-LMS course
 materials in sync.
 
-## Download for Windows
+## Downloads
 
-Download `BK-LMS-Downloader.exe` from the
+Download the matching asset from the
 [latest GitHub Release](https://github.com/TiKyisme/bk-lms-downloader/releases/latest).
+
+- **Windows:** `BK-LMS-Downloader-Windows.exe`
+- **Apple Silicon Mac (M1/M2/M3/M4):** `BK-LMS-Downloader-macOS-arm64.dmg`
+- **Intel Mac:** `BK-LMS-Downloader-macOS-x64.dmg`
+
+On a Mac, open **Apple menu → About This Mac**: it shows either an Apple chip
+or an Intel processor. macOS assets are unsigned until Developer ID signing and
+Apple notarization are configured; Gatekeeper may require an explicit user
+approval for such builds. See [macOS packaging notes](docs/MACOS_PACKAGING.md).
 No Python or Git setup is needed for the normal GUI experience.
 
 ## How to use
@@ -101,7 +110,7 @@ For downloaded courses, choose **Công cụ → Chuẩn bị đã chọn cho AI*
 an adjacent **AI Study Pack.zip** ready for ChatGPT upload. The pack starts with
 `START_HERE.md`, `COURSE_MAP.md`, `COVERAGE_REPORT.md`, and a copyable starter
 prompt; it also retains original lecture visual sources when diagrams matter.
-The Windows release includes this local preparation feature; it does not add AI
+Desktop releases include this local preparation feature; it does not add AI
 chat, cloud accounts, API keys, video transcription, or CUDA requirements.
 
 See [tools/README_prepare_ai_course.md](tools/README_prepare_ai_course.md) for
@@ -124,7 +133,8 @@ bklms --courses-file courses.txt --output "D:\University\HK1"
 
 ## Development
 
-Requirements: Python 3.10+, Google Chrome, and Windows 10/11 recommended.
+Requirements: Python 3.10+ and Google Chrome. Windows 10/11 and macOS are
+supported packaging targets.
 
 ```powershell
 py -m venv .venv
@@ -134,8 +144,9 @@ pip install -e ".[dev]"
 pytest -q
 ```
 
-Start the GUI with `bklms-gui` or `python app.py`. Build the official Windows
-artifact with `./scripts/build_windows.ps1`.
+Start the GUI with `bklms-gui` or `python app.py`. Build the Windows artifact
+with `./scripts/build_windows.ps1`; on a real Mac, build a native DMG with
+`bash scripts/build_macos.sh arm64` or `bash scripts/build_macos.sh x64`.
 
 ## Disclaimer
 

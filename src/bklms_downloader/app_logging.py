@@ -1,21 +1,18 @@
 from __future__ import annotations
 
 import logging
-import os
 import re
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+
+from .platform_support import user_config_dir
 
 
 APP_NAME = "BK-LMS-Downloader"
 
 
 def default_log_path() -> Path:
-    if os.name == "nt":
-        base = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
-    else:
-        base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-    return base / APP_NAME / "logs" / "app.log"
+    return user_config_dir() / "logs" / "app.log"
 
 
 def redact_sensitive_text(value: str) -> str:

@@ -10,6 +10,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .models import Course, CourseSyncResult
+from .platform_support import user_config_dir
 from .utils import extract_course_code, is_course_url, normalized_course_url
 from .app_logging import get_logger
 
@@ -20,11 +21,7 @@ LOG = get_logger(__name__)
 
 def default_courses_path() -> Path:
     """Choose a per-user configuration file without touching the repository."""
-    if os.name == "nt":
-        base = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
-    else:
-        base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-    return base / "BK-LMS-Downloader" / "courses.json"
+    return user_config_dir() / "courses.json"
 
 
 class CourseStore:

@@ -9,6 +9,7 @@ from pathlib import Path
 
 from .config import DEFAULT_OUTPUT
 from .app_logging import get_logger
+from .platform_support import user_config_dir
 
 
 SCHEMA_VERSION = 1
@@ -17,11 +18,7 @@ LOG = get_logger(__name__)
 
 def default_settings_path() -> Path:
     """Return the per-user UI settings file without using the repository."""
-    if os.name == "nt":
-        base = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
-    else:
-        base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-    return base / "BK-LMS-Downloader" / "settings.json"
+    return user_config_dir() / "settings.json"
 
 
 class AppSettings:

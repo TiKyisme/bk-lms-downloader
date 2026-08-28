@@ -80,3 +80,21 @@ def test_malformed_and_network_failures_are_safe():
     assert UpdateChecker("0.4.0", session=FakeSession(FakeResponse({}))).check() is None
     assert UpdateChecker("0.4.0", session=FakeSession(FakeResponse(ValueError("bad json")))).check() is None
     assert UpdateChecker("0.4.0", session=FakeSession(error=requests.Timeout())).check() is None
+
+
+def test_platform_asset_selection_prefers_the_matching_macos_dmg():
+    value = release(
+        "v1.0.1",
+        assets=[
+            {"name": "BK-LMS-Downloader-Windows.exe", "browser_download_url": "https://example.test/windows.exe"},
+            {"name": "BK-LMS-Downloader-macOS-arm64.dmg", "browser_download_url": "https://example.test/arm64.dmg"},
+            {"name": "BK-LMS-Downloader-macOS-x64.dmg", "browser_download_url": "https://example.test/x64.dmg"},
+        ],
+    )
+
+    assert UpdateChecker._platform_download_url(
+        value, platform_name="darwin", machine="arm64"
+    ) == "https://example.test/arm64.dmg"
+    assert UpdateChecker._platform_download_url(
+        value, platform_name="darwin", machine="x86_64"
+    ) == "https://example.test/x64.dmg"
