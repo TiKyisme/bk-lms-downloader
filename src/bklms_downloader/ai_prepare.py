@@ -172,14 +172,16 @@ def _ai_runtime_self_test() -> Path:
 
 def run_ai_runtime_self_test() -> int:
     """Return a process exit code and persist diagnostics for windowed builds."""
+    error_log = Path("ai-self-test-error.log")
     try:
         output = _ai_runtime_self_test()
     except Exception:
-        Path("ai-self-test-error.log").write_text(
+        error_log.write_text(
             ai_runtime_diagnostics() + "\n\n" + traceback.format_exc(),
             encoding="utf-8",
         )
         return 1
+    error_log.unlink(missing_ok=True)
     Path("ai-self-test-diagnostics.log").write_text(
         ai_runtime_diagnostics()
         + f"\nSynthetic batch: OK\nAI Study Pack: OK\nAI_Knowledge: {output}\n",
@@ -191,14 +193,16 @@ def run_ai_runtime_self_test() -> int:
 def run_ai_runtime_diagnostics() -> int:
     """Write and print a concise report while exercising the full batch path."""
     report = ai_runtime_diagnostics()
+    error_log = Path("ai-self-test-error.log")
     try:
         output = _ai_runtime_self_test()
     except Exception:
-        Path("ai-self-test-error.log").write_text(
+        error_log.write_text(
             report + "\n\n" + traceback.format_exc(),
             encoding="utf-8",
         )
         return 1
+    error_log.unlink(missing_ok=True)
     report += f"\nSynthetic batch: OK\nAI Study Pack: OK\nAI_Knowledge: {output}"
     Path("ai-self-test-diagnostics.log").write_text(report + "\n", encoding="utf-8")
     try:

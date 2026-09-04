@@ -33,22 +33,24 @@ fi
 
 "$python_bin" -m pip install --upgrade pip
 "$python_bin" -m pip install ".[dev]"
-"$python_bin" -m pytest
+if [[ "${BKLMS_SKIP_TESTS:-0}" != "1" ]]; then
+  "$python_bin" -m pytest
+fi
 
-"$python_bin" -m PyInstaller \
-  --noconfirm \
-  --clean \
-  --windowed \
-  --name "$app_name" \
-  --paths src \
-  --collect-submodules bklms_downloader \
-  --collect-all customtkinter \
-  --hidden-import markdownify \
-  --hidden-import pypdf \
-  --hidden-import pptx \
-  --collect-all selenium \
-  --add-data "tools/prepare_ai_course.py:tools" \
-  app.py
+icon_source="$repo_root/BK-LMS-Downloader-icon-blue.png"
+iconset="$repo_root/build/BK-LMS-Downloader.iconset"
+macos_icon="$repo_root/build/BK-LMS-Downloader.icns"
+rm -rf "$iconset"
+mkdir -p "$iconset"
+for size in 16 32 128 256 512; do
+  sips -z "$size" "$size" "$icon_source" --out "$iconset/icon_${size}x${size}.png" >/dev/null
+  double_size=$((size * 2))
+  sips -z "$double_size" "$double_size" "$icon_source" \
+    --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
+done
+iconutil -c icns "$iconset" -o "$macos_icon"
+
+"$python_bin" tools/build_desktop.py
 
 if [[ ! -d "$app_bundle" ]]; then
   echo "Build finished but app bundle was not found: $app_bundle" >&2

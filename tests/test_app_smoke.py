@@ -3,10 +3,14 @@ from pathlib import Path
 import bklms_downloader.ai_prepare as ai_prepare
 
 
-def test_ai_runtime_smoke_returns_success(monkeypatch):
+def test_ai_runtime_smoke_returns_success(monkeypatch, tmp_path: Path):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "ai-self-test-error.log").write_text("stale", encoding="utf-8")
     monkeypatch.setattr(ai_prepare, "_ai_runtime_self_test", lambda: None)
 
     assert ai_prepare.run_ai_runtime_self_test() == 0
+    assert not (tmp_path / "ai-self-test-error.log").exists()
+    assert (tmp_path / "ai-self-test-diagnostics.log").is_file()
 
 
 def test_ai_runtime_smoke_persists_failure_diagnostics(monkeypatch, tmp_path: Path):

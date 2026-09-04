@@ -6,6 +6,11 @@ Silicon. It builds a clickable `BK-LMS Downloader.app`, runs the packaged AI and
 sync self-tests, then creates a DMG containing the app plus an `Applications`
 shortcut.
 
+The build converts the project-owned `BK-LMS-Downloader-icon-blue.png` into a
+native `.icns` inside the ignored `build/` directory and passes it through the
+shared PyInstaller configuration. The generated `.icns` is not source data and
+does not need to be committed.
+
 The application continues to use Selenium Manager through `webdriver.Chrome`,
 so it does not hardcode a Windows Chrome path. On macOS, Selenium Manager can
 use the standard Chrome bundle at

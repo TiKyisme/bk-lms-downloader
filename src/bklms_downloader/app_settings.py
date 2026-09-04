@@ -31,7 +31,7 @@ class AppSettings:
         default_output: Path | str = DEFAULT_OUTPUT,
     ):
         self.path = Path(path) if path is not None else default_settings_path()
-        self.default_output = self._normalise_path(default_output)
+        self.default_output = self.normalize_path(default_output)
         self.last_output_dir = self.default_output
         self.load()
 
@@ -48,11 +48,11 @@ class AppSettings:
 
         value = payload.get("last_output_dir") if isinstance(payload, dict) else None
         if isinstance(value, str) and value.strip():
-            self.last_output_dir = self._normalise_path(value)
+            self.last_output_dir = self.normalize_path(value)
         return self.last_output_dir
 
     def set_last_output_dir(self, output: Path | str) -> str:
-        self.last_output_dir = self._normalise_path(output)
+        self.last_output_dir = self.normalize_path(output)
         self.save()
         return self.last_output_dir
 
@@ -84,11 +84,15 @@ class AppSettings:
                     pass
 
     @staticmethod
-    def _normalise_path(value: Path | str) -> str:
+    def normalize_path(value: Path | str) -> str:
         raw = str(value).strip()
         if not raw:
             raise ValueError("Thư mục lưu không được để trống.")
         return str(Path(raw).expanduser())
+
+    # Kept as a private alias for older callers while new UI flows use the
+    # public normalization boundary explicitly.
+    _normalise_path = normalize_path
 
     def _backup_corrupt_file(self) -> None:
         if not self.path.is_file():

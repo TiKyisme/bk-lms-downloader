@@ -99,6 +99,48 @@ class CourseStore:
         self.save()
         return course
 
+    def add_many(
+        self,
+        entries: Iterable[tuple[str, Path | str, str, str]],
+    ) -> list[Course]:
+        """Add multiple imported courses with one atomic persistence write.
+
+        Existing URLs and duplicates within ``entries`` are skipped. Validation
+        finishes before the in-memory list changes, and a failed save restores
+        the original list so the GUI cannot show unpersisted imports.
+        """
+        known_urls = {normalized_course_url(course.url) for course in self._courses}
+        prepared: list[Course] = []
+        for url, output, name, code in entries:
+            normalized_url = self._validate_url(url)
+            if normalized_url in known_urls:
+                continue
+            output_raw = str(output).strip()
+            if not output_raw:
+                raise ValueError("Thư mục lưu không được để trống.")
+            known_urls.add(normalized_url)
+            prepared.append(
+                Course(
+                    id=uuid.uuid4().hex,
+                    url=normalized_url,
+                    output=str(Path(output_raw).expanduser()),
+                    name=name.strip(),
+                    code=(code.strip().upper() or extract_course_code(name) or ""),
+                    selected=True,
+                )
+            )
+        if not prepared:
+            return []
+
+        original = self._courses
+        self._courses = [*original, *prepared]
+        try:
+            self.save()
+        except Exception:
+            self._courses = original
+            raise
+        return prepared
+
     def edit(self, course_id: str, **changes: object) -> Course:
         course = self._require(course_id)
         if "url" in changes:

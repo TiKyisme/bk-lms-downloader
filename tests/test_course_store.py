@@ -99,6 +99,38 @@ def test_remove_many_persists_once_and_ignores_unknown_ids(tmp_path: Path, monke
     assert [course.id for course in CourseStore(store.path).list()] == [second.id]
 
 
+def test_add_many_skips_duplicates_writes_once_and_rolls_back_on_failure(tmp_path: Path, monkeypatch):
+    store = CourseStore(tmp_path / "courses.json")
+    existing = store.add(course_url(3001), tmp_path / "existing", name="Existing")
+    original_courses = store.list()
+    original_save = store.save
+    save_calls = 0
+
+    def count_save():
+        nonlocal save_calls
+        save_calls += 1
+        original_save()
+
+    monkeypatch.setattr(store, "save", count_save)
+    added = store.add_many(
+        [
+            (course_url(3001), tmp_path / "changed", "Duplicate", "CO3001"),
+            (course_url(3002), tmp_path / "new", "New", "CO3002"),
+            (course_url(3002), tmp_path / "newer", "Duplicate new", "CO3002"),
+        ]
+    )
+    assert len(added) == 1
+    assert save_calls == 1
+    assert store.get(existing.id).output == str(tmp_path / "existing")
+
+    before_failure = store.list()
+    monkeypatch.setattr(store, "save", lambda: (_ for _ in ()).throw(OSError("disk full")))
+    with pytest.raises(OSError, match="disk full"):
+        store.add_many([(course_url(3003), tmp_path / "three", "Three", "CO3003")])
+    assert store.list() == before_failure
+    assert original_courses[0].id == existing.id
+
+
 def test_clear_persists_an_empty_course_list(tmp_path: Path):
     path = tmp_path / "courses.json"
     store = CourseStore(path)

@@ -1,13 +1,19 @@
-# BK-LMS Downloader v1.0.9 release checklist
+# BK-LMS Downloader v1.1.2 release checklist
 
 Complete this manual checklist before creating the public tag.
 
 - [ ] `pytest -q` is green locally.
 - [ ] GitHub Actions test workflow is green.
 - [ ] Windows EXE is built as `dist/BK-LMS-Downloader.exe`.
+- [ ] Windows EXE embeds `BK-LMS-Downloader-icon-blue.ico`, verified by the build script.
+- [ ] Release workflow produces Windows, macOS arm64, and macOS x64 assets before one release job.
+- [ ] `python tools/validate_versions.py --tag v1.1.2 --msix-version 1.1.2.0` passes.
 - [ ] EXE opens without Python installed.
 - [ ] Chrome opens and official BK-LMS login works.
 - [ ] **Nhập từ BK-LMS** lists accessible courses.
+- [ ] Import dialog shows an editable output path and native **Chọn folder...** picker.
+- [ ] Imported courses use the confirmed folder; cancelling changes neither courses nor the saved default.
+- [ ] Existing/duplicate courses remain disabled and keep their original output paths.
 - [ ] Imported names do not include `Khóa học được đánh dấu sao` or `Tên khóa học` prefixes.
 - [ ] Manual Add Course works and remembers the output folder.
 - [ ] Sync selected works.
@@ -49,4 +55,4 @@ Complete this manual checklist before creating the public tag.
 - [ ] GUI has no obsolete current-course Delete or AI modes at common laptop sizes.
 - [ ] No credentials, cookies, or session material are present in repository files or logs.
 - [ ] README screenshot and download instructions are current.
-- [ ] Create `v1.0.9` only after all above smoke tests pass.
+- [ ] Create `v1.1.2` only after all above smoke tests pass.

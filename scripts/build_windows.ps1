@@ -1,3 +1,7 @@
+param(
+    [switch]$SkipTests
+)
+
 $ErrorActionPreference = "Stop"
 
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
@@ -14,28 +18,20 @@ $Python = Join-Path $Venv "Scripts\python.exe"
 & $Python -m pip install -U pip
 & $Python -m pip install ".[dev]"
 
-& $Python -m pytest
+if (-not $SkipTests) {
+    & $Python -m pytest
+}
 
-& $Python -m PyInstaller `
-    --noconfirm `
-    --clean `
-    --onefile `
-    --windowed `
-    --name "BK-LMS-Downloader" `
-    --paths "src" `
-    --collect-submodules bklms_downloader `
-    --collect-all customtkinter `
-    --hidden-import markdownify `
-    --hidden-import pypdf `
-    --hidden-import pptx `
-    --collect-all selenium `
-    --add-data "tools/prepare_ai_course.py;tools" `
-    "app.py"
+& $Python tools/build_desktop.py
 
 $Exe = Join-Path $RepoRoot "dist\BK-LMS-Downloader.exe"
 if (-not (Test-Path $Exe)) {
     throw "Build finished but EXE was not found: $Exe"
 }
+
+& (Join-Path $RepoRoot "scripts\verify_windows_icon.ps1") `
+    -ExePath $Exe `
+    -SourcePngPath (Join-Path $RepoRoot "BK-LMS-Downloader-icon-blue.png")
 
 $SelfTest = Start-Process `
     -FilePath $Exe `
@@ -61,6 +57,19 @@ if ($SyncTest.ExitCode -ne 0) {
         Get-Content "sync-self-test-error.log"
     }
     throw "Packaged sync timeout recovery validation failed."
+}
+
+$ScrollTest = Start-Process `
+    -FilePath $Exe `
+    -ArgumentList "--self-test-scroll" `
+    -Wait `
+    -PassThru `
+    -WindowStyle Hidden
+if ($ScrollTest.ExitCode -ne 0) {
+    if (Test-Path "scroll-self-test-error.log") {
+        Get-Content "scroll-self-test-error.log"
+    }
+    throw "Packaged GUI scroll/layout validation failed."
 }
 
 Write-Host "" 

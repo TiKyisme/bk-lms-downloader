@@ -23,7 +23,9 @@ No Python or Git setup is needed for the normal GUI experience.
 1. Open the app and click **Mở Chrome để đăng nhập**.
 2. Log in directly on the official BK-LMS website in Chrome.
 3. Add a course URL once, or click **Nhập từ BK-LMS** to choose courses from
-   your enrolled-course list.
+   your enrolled-course list. The import dialog lets you choose the output
+   folder before confirming; the selected folder is shared by newly imported
+   courses only.
 4. Choose courses and click **Đồng bộ tất cả** (or **Đồng bộ đã chọn**).
 5. The activity panel shows the current resource and elapsed time. Use **Hủy đồng bộ**
    to stop safely; completed files stay in place.
@@ -81,7 +83,7 @@ account has write permission.
 the app activity log. The Windows release already includes the local AI
 preparation components; no Python, pip, or API key is required.
 
-For support diagnostics, run `BK-LMS-Downloader.exe --diagnose-ai`; it verifies
+For Windows support diagnostics, run `BK-LMS-Downloader-Windows.exe --diagnose-ai`; it verifies
 the same synthetic batch path and writes `ai-self-test-diagnostics.log` beside
 the command's working directory.
 
@@ -115,6 +117,9 @@ chat, cloud accounts, API keys, video transcription, or CUDA requirements.
 
 See [tools/README_prepare_ai_course.md](tools/README_prepare_ai_course.md) for
 the standalone source-tool workflow.
+
+Microsoft Store packaging uses a four-component version whose last component
+must remain `0`; see [Microsoft Store versioning](docs/MICROSOFT_STORE.md).
 
 ## CLI (advanced)
 

@@ -36,6 +36,9 @@ from .utils import is_course_url, safe_name
 
 
 LOG = get_logger(__name__)
+MAX_UI_EVENTS_PER_TICK = 100
+LIVE_LOG_MAX_LINES = 500
+LIVE_LOG_TRIM_TO_LINES = 450
 
 
 def shorten_sync_activity(message: str, limit: int = 104) -> str:
@@ -46,6 +49,26 @@ def shorten_sync_activity(message: str, limit: int = 104) -> str:
     head = int(limit * 0.72)
     tail = limit - head - 1
     return f"{text[:head].rstrip()}…{text[-tail:].lstrip()}"
+
+
+def directory_picker_initial_dir(
+    current_value: str,
+    fallback_value: str,
+    *,
+    home: Path | None = None,
+) -> Path:
+    """Choose an existing directory for a native folder picker."""
+    user_home = home if home is not None else Path.home()
+    for raw in (current_value, fallback_value, str(user_home)):
+        if not str(raw).strip():
+            continue
+        try:
+            candidate = Path(raw).expanduser()
+        except (TypeError, ValueError):
+            continue
+        if candidate.is_dir():
+            return candidate
+    return user_home
 
 
 class CourseDialog(ctk.CTkToplevel):
@@ -226,7 +249,7 @@ class ImportCoursesDialog(ctk.CTkToplevel):
         self,
         parent: "App",
         courses: list[DiscoveredCourse],
-        on_add: Callable[[list[DiscoveredCourse]], None],
+        on_add: Callable[[list[DiscoveredCourse], str], None],
     ):
         super().__init__(parent)
         self.parent_app = parent
@@ -239,9 +262,10 @@ class ImportCoursesDialog(ctk.CTkToplevel):
             course.url: tk.BooleanVar(value=course.url in self.available_urls)
             for course in courses
         }
+        self.output_var = tk.StringVar(value=self.default_output(parent))
         self.title("Nhập course từ BK-LMS")
-        self.geometry("720x520")
-        self.minsize(610, 390)
+        self.geometry("720x590")
+        self.minsize(610, 460)
         self.configure(fg_color=THEME.bg)
         self.transient(parent)
         self.grab_set()
@@ -325,18 +349,43 @@ class ImportCoursesDialog(ctk.CTkToplevel):
                     text_color=THEME.muted_text,
                 ).grid(row=0, column=3, sticky="e", padx=12)
 
+        output = ctk.CTkFrame(card, fg_color="transparent")
+        output.grid(row=2, column=0, sticky="ew", padx=18, pady=(0, 12))
+        output.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(
-            card,
-            text=f"Thư mục lưu mặc định: {self.parent_app.settings.last_output_dir}",
-            font=(THEME.font_family, 12),
-            text_color=THEME.muted_text,
-        ).grid(row=2, column=0, sticky="w", padx=18, pady=(0, 8))
+            output,
+            text="Thư mục lưu",
+            anchor="w",
+            font=(THEME.font_family, 12, "bold"),
+            text_color=THEME.text,
+        ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 5))
+        self.output_entry = ctk.CTkEntry(
+            output,
+            textvariable=self.output_var,
+            height=38,
+            border_color=THEME.border,
+            corner_radius=9,
+        )
+        self.output_entry.grid(row=1, column=0, sticky="ew", padx=(0, 8))
+        ctk.CTkButton(
+            output,
+            text="Chọn folder...",
+            command=self._choose_output,
+            height=38,
+            width=122,
+            fg_color=THEME.surface,
+            hover_color=THEME.primary_soft,
+            text_color=THEME.primary,
+            border_color=THEME.border,
+            border_width=1,
+            corner_radius=9,
+        ).grid(row=1, column=1, sticky="e")
         actions = ctk.CTkFrame(card, fg_color="transparent")
         actions.grid(row=3, column=0, sticky="e", padx=18, pady=(0, 18))
         ctk.CTkButton(
             actions,
             text="Hủy",
-            command=self.destroy,
+            command=self._cancel,
             height=38,
             width=100,
             fg_color=THEME.surface,
@@ -357,14 +406,41 @@ class ImportCoursesDialog(ctk.CTkToplevel):
             corner_radius=9,
         ).pack(side="right", padx=(0, 8))
 
+    @staticmethod
+    def default_output(parent: "App") -> str:
+        return parent.settings.last_output_dir
+
+    def _cancel(self) -> None:
+        self.destroy()
+
+    def _choose_output(self) -> None:
+        initial_dir = directory_picker_initial_dir(
+            self.output_var.get(),
+            self.parent_app.settings.default_output,
+        )
+        selected = filedialog.askdirectory(parent=self, initialdir=str(initial_dir))
+        if selected:
+            self.output_var.set(AppSettings.normalize_path(selected))
+
     def _submit(self) -> None:
         selected = [
-            course for course in self.courses if self.selection_vars[course.url].get()
+            course
+            for course in self.courses
+            if course.url in self.available_urls and self.selection_vars[course.url].get()
         ]
         if not selected:
             messagebox.showwarning("Chưa chọn course", "Hãy chọn ít nhất một course để thêm.", parent=self)
             return
-        self.on_add(selected)
+        try:
+            output = AppSettings.normalize_path(self.output_var.get())
+        except ValueError as exc:
+            messagebox.showwarning("Thư mục lưu", str(exc), parent=self)
+            return
+        try:
+            self.on_add(selected, output)
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("Không thể nhập course", str(exc), parent=self)
+            return
         self.destroy()
 
     def destroy(self) -> None:
@@ -606,6 +682,19 @@ class CourseRow(ctk.CTkFrame):
     def set_status(self, text: str, color: str = THEME.primary) -> None:
         self.status_label.configure(text=text, text_color=color)
 
+    def update_course(self, course: Course) -> None:
+        """Refresh one row in place without rebuilding the scrollable list."""
+        self.course = course
+        self.check_var.set(course.selected)
+        self.code_label.configure(
+            text=course.code or "-",
+            text_color=THEME.primary if course.code else THEME.muted_text,
+        )
+        self.name_label.configure(text=course.display_name)
+        self.last_sync_label.configure(text=App._format_last_sync(course.last_sync))
+        status, color = App._status_text(course)
+        self.status_label.configure(text=status, text_color=color)
+
 
 class App(ctk.CTk):
     def __init__(self):
@@ -635,6 +724,7 @@ class App(ctk.CTk):
         self._scroll_regions: dict[str, object] = {}
         self._wheel_remainders: dict[str, float] = {}
         self._activity_text_widget = None
+        self._live_log_line_count = 0
 
         self.login_status_var = tk.StringVar(value="Chưa đăng nhập")
         self.course_detail_var = tk.StringVar(
@@ -1208,6 +1298,15 @@ class App(ctk.CTk):
                 "Đánh dấu checkbox để đồng bộ, xóa hoặc chuẩn bị course cho AI."
             )
 
+    def _refresh_course_row(self, course_id: str) -> None:
+        course = self.store.get(course_id)
+        row = self.course_rows.get(course_id)
+        if course is not None and row is not None:
+            row.update_course(course)
+            row.set_current(course_id == self.current_course_id)
+            if course_id == self.current_course_id:
+                self._show_course_detail(course_id)
+
     @staticmethod
     def _format_last_sync(value: str | None) -> str:
         if not value:
@@ -1236,8 +1335,17 @@ class App(ctk.CTk):
     def _toggle_course(self, course_id: str, selected: bool) -> None:
         if self.syncing:
             return
-        self.store.edit(course_id, selected=selected)
-        self._refresh_courses()
+        course = self.store.get(course_id)
+        previous = course.selected if course is not None else not selected
+        try:
+            self.store.edit(course_id, selected=selected)
+        except (OSError, ValueError) as exc:
+            row = self.course_rows.get(course_id)
+            if row is not None:
+                row.check_var.set(previous)
+            messagebox.showerror("Không thể lưu lựa chọn", str(exc), parent=self)
+            return
+        self._refresh_course_row(course_id)
         self._select_course(course_id)
 
     def _show_course_detail(self, course_id: str) -> None:
@@ -1500,21 +1608,37 @@ class App(ctk.CTk):
             )
             return
 
-        def add_selected(selected: list[DiscoveredCourse]) -> None:
-            for course in selected:
-                try:
-                    self.store.add(
-                        course.url,
-                        self.settings.last_output_dir,
-                        name=course.name,
-                        code=course.code,
-                    )
-                except ValueError:
-                    continue
+        def add_selected(selected: list[DiscoveredCourse], output: str) -> None:
+            added = self._persist_imported_courses(selected, output)
             self._refresh_courses()
-            self._set_summary_message(f"Đã thêm {len(selected)} course. Sẵn sàng đồng bộ.")
+            self._set_summary_message(f"Đã thêm {len(added)} course. Sẵn sàng đồng bộ.")
 
         ImportCoursesDialog(self, courses, add_selected)
+
+    def _persist_imported_courses(
+        self,
+        selected: list[DiscoveredCourse],
+        output: str,
+    ) -> list[Course]:
+        previous_output = self.settings.last_output_dir
+        normalized_output = AppSettings.normalize_path(output)
+        self.settings.set_last_output_dir(normalized_output)
+        try:
+            return self.store.add_many(
+                (
+                    course.url,
+                    normalized_output,
+                    course.name,
+                    course.code,
+                )
+                for course in selected
+            )
+        except (OSError, ValueError):
+            try:
+                self.settings.set_last_output_dir(previous_output)
+            except OSError:
+                LOG.exception("Could not restore the previous import output folder")
+            raise
 
     def _open_login(self) -> None:
         if self.syncing:
@@ -1664,12 +1788,17 @@ class App(ctk.CTk):
         self.events.put(event)
 
     def _drain_events(self) -> None:
+        handled = 0
         try:
-            while True:
+            while handled < MAX_UI_EVENTS_PER_TICK:
                 self._handle_event(self.events.get_nowait())
+                handled += 1
         except queue.Empty:
             pass
-        self.after(120, self._drain_events)
+        if handled == MAX_UI_EVENTS_PER_TICK and not self.events.empty():
+            self.after_idle(self._drain_events)
+        else:
+            self.after(120, self._drain_events)
 
     def _handle_event(self, event: dict) -> None:
         kind = event.get("event")
@@ -1735,7 +1864,7 @@ class App(ctk.CTk):
         elif kind == "course_sync_complete":
             result = event["result"]
             self.progress.set(min(1, event["index"] / max(1, event["total"])))
-            self._refresh_courses()
+            self._refresh_course_row(result.course_id)
             if result.status == "error":
                 self._log(f"[ERROR] {result.name}: không thể đồng bộ.")
             else:
@@ -1828,7 +1957,8 @@ class App(ctk.CTk):
                 "resource_timeout",
             }:
                 self.current_course_var.set(shorten_sync_activity(message))
-            self._log(f"{prefixes[kind]} {message}")
+            if kind != "download_progress":
+                self._log(f"{prefixes[kind]} {message}")
 
     def _complete_sync(self, batch: SyncBatchResult, total: int) -> None:
         self._finish_sync_activity()
@@ -1875,8 +2005,14 @@ class App(ctk.CTk):
 
     def _log(self, text: str) -> None:
         timestamp = datetime.now().strftime("%H:%M:%S")
+        rendered = f"[{timestamp}] {text.rstrip()}\n"
         self.log_text.configure(state="normal")
-        self.log_text.insert("end", f"[{timestamp}] {text.rstrip()}\n")
+        self.log_text.insert("end", rendered)
+        self._live_log_line_count += rendered.count("\n")
+        if self._live_log_line_count > LIVE_LOG_MAX_LINES:
+            remove_lines = self._live_log_line_count - LIVE_LOG_TRIM_TO_LINES
+            self.log_text.delete("1.0", f"{remove_lines + 1}.0")
+            self._live_log_line_count -= remove_lines
         self.log_text.see("end")
         self.log_text.configure(state="disabled")
 

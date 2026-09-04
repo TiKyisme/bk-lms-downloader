@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.1.2 - 2026-09-04
+
+- Let students choose and confirm the shared output folder while importing
+  discovered BK-LMS courses; duplicates remain disabled and existing course
+  output paths are never changed.
+- Batch imported-course persistence into one atomic write, update checkbox and
+  completed-course rows in place, bound GUI event work per tick, and prevent
+  repeated transfer heartbeats from flooding the live activity log.
+- Use the project-owned blue graduation-cap icon for Windows EXE and macOS app
+  builds, with a Windows embedded-icon verification gate.
+- Centralize PyInstaller configuration, add source/tag/Store version validation,
+  require MSIX revision `0`, and strengthen the single multi-platform release
+  workflow with compile, test, runtime, icon, and version gates; successful AI
+  self-tests now clear stale failure diagnostics.
+
+## 1.1.0 - 2026-08-28
+
+- Add native macOS arm64 and Intel app/DMG builds to the coordinated GitHub
+  Release workflow.
+- Use platform-appropriate application-data folders, Finder/Explorer opening,
+  and update asset selection while preserving Windows behavior.
+
+## 1.0.10 - 2026-08-28
+
+- Stabilize the Sync panel while long activity names change, retaining full
+  messages in Recent Activity.
+- Keep responsive nested scrolling and reserve stable progress/log dimensions.
+
 ## 1.0.9 - 2026-08-28
 
 - Route nested mouse-wheel input centrally so My Courses, Recent Activity, and

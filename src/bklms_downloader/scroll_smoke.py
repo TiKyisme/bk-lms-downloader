@@ -127,7 +127,7 @@ def run_scroll_runtime_smoke() -> None:
             )
             for index in range(40)
         ]
-        modal = gui.ImportCoursesDialog(app, modal_courses, lambda _courses: None)
+        modal = gui.ImportCoursesDialog(app, modal_courses, lambda _courses, _output: None)
         app.update_idletasks()
         app.update()
         modal_scroll = app._scroll_regions[modal._scroll_owner]

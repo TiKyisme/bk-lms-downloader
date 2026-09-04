@@ -8,6 +8,8 @@ __pycache__/
 
 # Virtual environments
 .venv/
+.venv-build/
+.venv-build-macos/
 venv/
 env/
 
@@ -19,6 +21,8 @@ dist/
 /BK-LMS-Downloader.exe
 /ai-self-test-error.log
 /ai-self-test-diagnostics.log
+/sync-self-test-error.log
+/scroll-self-test-error.log
 
 # IDE / OS
 .vscode/
@@ -44,3 +48,5 @@ session.json
 
 # Local course lists
 courses.txt
+/courses.json
+/settings.json
