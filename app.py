@@ -9,6 +9,10 @@ if str(src_dir) not in sys.path:
 from bklms_downloader.gui import main
 
 if __name__ == "__main__":
+    if "--diagnose-chrome" in sys.argv:
+        from bklms_downloader.login_startup import diagnose_chrome
+
+        raise SystemExit(diagnose_chrome())
     if "--validate-ai-pack" in sys.argv:
         from bklms_downloader.ai_study_pack import run_ai_study_pack_validator
 

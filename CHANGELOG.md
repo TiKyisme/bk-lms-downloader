@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.3 - 2026-09-07
+
+- Open login Chrome with eager page loading and report browser readiness before
+  LMS navigation completes; remove the redundant login DOM wait and fixed sleep.
+- Reuse healthy controlled browsers, recreate closed sessions, guard duplicate
+  startup clicks, and clean up an in-flight startup on app shutdown.
+- Keep Selenium Manager's compatible-driver cache and disable its statistics
+  reporting. Record numeric startup phase timings without session data.
+- Add an explicit `--diagnose-chrome` command for source/packaged comparisons.
+
 ## 1.1.2 - 2026-09-04
 
 - Let students choose and confirm the shared output folder while importing

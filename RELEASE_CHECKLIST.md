@@ -1,4 +1,4 @@
-# BK-LMS Downloader v1.1.2 release checklist
+# BK-LMS Downloader v1.1.3 release checklist
 
 Complete this manual checklist before creating the public tag.
 
@@ -7,7 +7,10 @@ Complete this manual checklist before creating the public tag.
 - [ ] Windows EXE is built as `dist/BK-LMS-Downloader.exe`.
 - [ ] Windows EXE embeds `BK-LMS-Downloader-icon-blue.ico`, verified by the build script.
 - [ ] Release workflow produces Windows, macOS arm64, and macOS x64 assets before one release job.
-- [ ] `python tools/validate_versions.py --tag v1.1.2 --msix-version 1.1.2.0` passes.
+- [ ] `python tools/validate_versions.py --tag v1.1.3 --msix-version 1.1.3.0` passes.
+- [ ] Compare first/cached Chrome startup timings using `--diagnose-chrome`.
+- [ ] Double-click login, reuse a window, close Chrome, then reopen; no duplicate sessions.
+- [ ] Exit the app during startup and verify its controlled browser/service is cleaned up.
 - [ ] EXE opens without Python installed.
 - [ ] Chrome opens and official BK-LMS login works.
 - [ ] **Nhập từ BK-LMS** lists accessible courses.
@@ -55,4 +58,4 @@ Complete this manual checklist before creating the public tag.
 - [ ] GUI has no obsolete current-course Delete or AI modes at common laptop sizes.
 - [ ] No credentials, cookies, or session material are present in repository files or logs.
 - [ ] README screenshot and download instructions are current.
-- [ ] Create `v1.1.2` only after all above smoke tests pass.
+- [ ] Create `v1.1.3` only after all above smoke tests pass.

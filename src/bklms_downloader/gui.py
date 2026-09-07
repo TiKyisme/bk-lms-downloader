@@ -6,7 +6,7 @@ import tkinter as tk
 import webbrowser
 from datetime import datetime
 from pathlib import Path
-from time import monotonic
+from time import monotonic, perf_counter
 from tkinter import filedialog, messagebox
 from typing import Callable
 
@@ -16,7 +16,8 @@ from . import __version__
 from .ai_prepare import AIBatchPreparer, AIBatchPreparationResult
 from .app_logging import get_logger
 from .app_settings import AppSettings
-from .auth import create_driver, make_session, wait_page
+from .auth import make_session, wait_page
+from .login_startup import LoginStartup
 from .config import LMS_BASE
 from .course_discovery import (
     CourseDiscoveryError,
@@ -709,6 +710,8 @@ class App(ctk.CTk):
         self.grid_rowconfigure(0, weight=1)
 
         self.driver = None
+        self._login_startup = LoginStartup()
+        self.login_opening = False
         self.events: queue.Queue[dict] = queue.Queue()
         self.store = CourseStore()
         self.settings = AppSettings()
@@ -1563,7 +1566,7 @@ class App(ctk.CTk):
         threading.Thread(target=worker, daemon=True).start()
 
     def _import_courses(self) -> None:
-        if self.syncing:
+        if self.syncing or self.login_opening:
             return
         if self.driver is None:
             messagebox.showwarning(
@@ -1641,24 +1644,30 @@ class App(ctk.CTk):
             raise
 
     def _open_login(self) -> None:
-        if self.syncing:
+        if self.syncing or self.login_opening:
             return
-        self.login_btn.configure(state="disabled")
-        self._set_login_status("Đang mở Chrome...", "busy")
+        clicked_at = perf_counter()
+        self.login_opening = True
+        for button in (self.login_btn, self.import_btn, self.sync_selected_btn, self.sync_all_btn):
+            button.configure(state="disabled")
+        self._set_login_status("Đang khởi động Chrome...", "busy")
+        self._login_startup.driver = self.driver
 
         def worker() -> None:
             try:
-                if self.driver is None:
-                    self.driver = create_driver()
-                self.driver.get(LMS_BASE)
-                wait_page(self.driver)
-                self.events.put({"event": "login_ready"})
-            except Exception as exc:
-                LOG.warning("Could not open Chrome: %s", exc)
-                self.driver = None
-                self.events.put({"event": "login_error"})
+                self._login_startup.run(
+                    lambda event: self._emit_from_worker(event) if event["event"] != "login_finished" else None,
+                    clicked_at,
+                )
+            finally:
+                self.driver = self._login_startup.driver
+                self.events.put({"event": "login_finished"})
 
-        threading.Thread(target=worker, daemon=True).start()
+        try:
+            threading.Thread(target=worker, daemon=True).start()
+        except RuntimeError:
+            self.events.put({"event": "login_error", "message": "Không tạo được tác vụ mở Chrome."})
+            self.events.put({"event": "login_finished"})
 
     def _check_for_updates(self) -> None:
         def worker() -> None:
@@ -1673,6 +1682,8 @@ class App(ctk.CTk):
             webbrowser.open(self.update_info.release_url)
 
     def current_course_url(self) -> str | None:
+        if self.login_opening:
+            return None
         if self.driver is None:
             messagebox.showwarning(
                 "Chưa mở Chrome",
@@ -1697,6 +1708,8 @@ class App(ctk.CTk):
         return url
 
     def _start_sync(self, selected_only: bool) -> None:
+        if self.login_opening:
+            return
         if self.driver is None:
             messagebox.showwarning(
                 "Chưa đăng nhập",
@@ -1803,14 +1816,21 @@ class App(ctk.CTk):
     def _handle_event(self, event: dict) -> None:
         kind = event.get("event")
         if kind == "login_ready":
-            self._set_login_status("Chrome đã mở — hãy đăng nhập", "success")
-            self.login_btn.configure(state="normal")
+            self._set_login_status("Chrome đã mở — hãy đăng nhập BK-LMS", "success")
+            self.current_course_var.set("Đang kiểm tra BK-LMS...")
+            LOG.info("Chrome startup timing ui_browser_ready=%.3fs", perf_counter() - event["clicked_at"])
+        elif kind == "login_navigation_complete":
+            self.current_course_var.set("Sẵn sàng đồng bộ")
+        elif kind == "login_finished":
+            self.login_opening = False
+            for button in (self.login_btn, self.import_btn, self.sync_selected_btn, self.sync_all_btn):
+                button.configure(state="disabled" if self.syncing else "normal")
         elif kind == "login_error":
-            self._set_login_status("Không mở được Chrome", "error")
-            self.login_btn.configure(state="normal")
+            self._set_login_status("Cần kiểm tra Chrome/BK-LMS", "error")
+            self.current_course_var.set("Sẵn sàng thử lại")
             messagebox.showerror(
                 "Không mở được Chrome",
-                "Không thể mở Chrome. Hãy kiểm tra Chrome rồi thử lại.",
+                event.get("message", "Không thể mở Chrome. Hãy kiểm tra Chrome rồi thử lại."),
                 parent=self,
             )
         elif kind == "courses_discovered":
@@ -2019,11 +2039,13 @@ class App(ctk.CTk):
     def _on_close(self) -> None:
         if self.sync_cancel_event is not None:
             self.sync_cancel_event.set()
-        if self.driver is not None:
-            try:
-                self.driver.quit()
-            except Exception:
-                pass
+        self._login_startup.closing.set()
+        if not self.login_opening:
+            self._login_startup.driver = self.driver
+        # Cleanup uses Selenium's owned service, never a global Chrome kill.
+        # A non-daemon cleanup waits for an in-flight constructor to hand over
+        # its driver, without holding up Tk's event loop.
+        threading.Thread(target=self._login_startup.close, daemon=False).start()
         self.destroy()
 
 
