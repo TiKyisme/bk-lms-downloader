@@ -1,180 +1,90 @@
 # prepare_ai_course.py
 
-Tool thứ hai trong workflow:
+This local tool converts one downloaded BK-LMS course into one portable ZIP.
+It does not call an AI service, upload data, or create a persistent
+`AI_Knowledge` directory.
 
 ```text
-BK-LMS Downloader v2
-        ↓
-raw course archive
-        ↓
-prepare_ai_course.py
-        ↓
-AI-ready knowledge base
-        ↓
-ChatGPT / RAG / AI Tutor
+BK-LMS download -> private temporary extraction/workspace -> one AI Study Pack ZIP
 ```
 
-## 1. Cài thư viện
-
-PowerShell:
+## Install
 
 ```powershell
 pip install beautifulsoup4 markdownify pypdf python-pptx
 ```
 
-Nếu muốn transcript video:
+Install `faster-whisper` only when transcription is explicitly needed.
 
-```powershell
-pip install faster-whisper
-```
-
-## 2. Chạy với folder raw
+## Run
 
 ```powershell
 python prepare_ai_course.py `
   --input "D:\University\BK_LMS_Data\Your Course" `
-  --output "D:\University\AI_Knowledge" `
-  --force
+  --output "D:\University\BK_LMS_Data"
 ```
 
-Hoặc input thẳng ZIP:
+ZIP input is also supported:
 
 ```powershell
 python prepare_ai_course.py `
-  --input "D:\test_v2.zip" `
-  --output "D:\University\AI_Knowledge" `
-  --force
+  --input "D:\University\Your Course.zip" `
+  --output "D:\University\BK_LMS_Data"
 ```
 
-## 3. Mặc định tool làm gì?
+The output is named `<CourseName>_AI_Study_Pack.zip`. Existing files are never
+deleted; a collision receives a deterministic `_2`, `_3`, and so on suffix.
+The old `--force` flag remains accepted for compatibility but does not delete
+anything. Passing an output path named `AI_Knowledge` is redirected to its
+parent for compatibility and safety.
 
-- `content.txt` được ưu tiên hơn `content.html` trong cùng Moodle Page.
-- HTML trùng sẽ bị skip để tránh feed AI hai lần.
-- PDF lecture được extract theo **page**.
-- PPTX được extract theo **slide**.
-- Subtitle `.srt/.vtt` được đưa vào corpus theo timestamp.
-- Video/audio chưa transcript sẽ nằm trong `transcription_queue.md`.
-- Textbook/reference lớn chỉ nằm trong `references_index.md`, không flood corpus mặc định.
-- `.url` chỉ nằm trong `links_index.md`, không xem là kiến thức.
-- Documents/chunks có metadata: `source_id`, source path, chapter, priority, page/slide/timestamp.
+## Extraction behavior
 
-## 4. Transcript toàn bộ video
+- `content.txt` is preferred over a duplicate `content.html`.
+- Lecture PDFs retain page locators; PPTX files retain slide locators.
+- Subtitles retain timestamp locators.
+- Untranscribed media, references, URL shortcuts, duplicates, and extraction
+  errors remain visible in the source index and coverage tracker.
+- Original lecture PDFs/PPTX files are retained under `sources/` when visual
+  layout or diagrams may matter.
+- Source paths inside metadata are relative; cookies, sessions, and absolute
+  developer paths are not included.
 
-CPU:
-
-```powershell
-python prepare_ai_course.py `
-  --input "D:\test_v2.zip" `
-  --output "C:\...\MMT\AI_Knowledge" `
-  --transcribe `
-  --whisper-model small `
-  --whisper-device cpu `
-  --whisper-compute-type int8 `
-  --force
-```
-
-Nếu có NVIDIA CUDA:
-
-```powershell
-python prepare_ai_course.py `
-  --input "D:\test_v2.zip" `
-  --output "C:\...\MMT\AI_Knowledge" `
-  --transcribe `
-  --whisper-model medium `
-  --whisper-device cuda `
-  --whisper-compute-type float16 `
-  --force
-```
-
-`--language` bỏ trống = auto detect. Nếu video hầu hết tiếng Anh có thể thêm `--language en`; tiếng Việt dùng `--language vi`.
-
-## 5. Extract cả textbook/reference
-
-Không khuyên bật ngay cho AI tutor cơ bản vì corpus sẽ rất lớn. Khi cần:
-
-```powershell
-python prepare_ai_course.py `
-  --input "D:\test_v2.zip" `
-  --output "C:\...\MMT\AI_Knowledge_FULL" `
-  --include-references `
-  --force
-```
-
-## 6. Output
+## ZIP structure
 
 ```text
-AI_Knowledge/
-├─ START_HERE.md
-├─ COURSE_MAP.md
-├─ COVERAGE_REPORT.md
-├─ TUTOR_PROTOCOL.md
-├─ CHATGPT_START_PROMPT.txt
+<CourseName>_AI_Study_Pack.zip
+├─ 00_START_HERE.md
+├─ 01_COURSE_MAP.md
+├─ 02_TUTOR_PROTOCOL.md
+├─ 03_SOURCE_INDEX.md
+├─ 04_COVERAGE_TRACKER.md
+├─ 05_RESUME_STATE.md
 ├─ chapters/
-├─ sources/
-├─ AI_TUTOR_CONTEXT.md
-├─ course_index.md
-├─ processing_report.md
-├─ references_index.md
-├─ transcription_queue.md
-├─ links_index.md
-│
 ├─ documents/
-│  ├─ 00_course/
-│  ├─ chapter_01/
-│  ├─ chapter_02/
-│  ├─ ...
-│  └─ other/
-│
 ├─ chunks/
-│  ├─ 00_course/
-│  ├─ chapter_01/
-│  └─ ...
-│
+├─ sources/
 └─ meta/
    ├─ corpus.jsonl
    ├─ documents.jsonl
-   ├─ documents.csv
    ├─ stats.json
-└─ raw_downloader_metadata/
+   ├─ visual_manifest.json
+   └─ study_pack_manifest.json
 ```
 
-The preparation also creates `<course name> - AI Study Pack.zip` beside
-`AI_Knowledge`. It is the portable, ChatGPT-ready export. Use
-`python -m bklms_downloader.ai_study_pack --validate-ai-pack <AI_Knowledge>`
-to run the structural validator before sharing a pack.
+`00_START_HERE.md` is the bootstrap contract. It directs the tutor to inspect
+the numbered control files and source material, build or validate the roadmap,
+start at the first unresolved micro-topic, teach interactively, assess, wait,
+debug misconceptions, and track mastery. The ZIP is for one course only.
 
-### File quan trọng nhất để feed AI
+Validate an unpacked pack with:
 
-- **AI_TUTOR_CONTEXT.md** — luật sử dụng knowledge base và source priority.
-- **course_index.md** — mục lục human-readable.
-- **documents/** — nội dung full đã chuẩn hóa.
-- **meta/corpus.jsonl** — chunk-level data dùng cho embeddings/vector DB/RAG.
-
-## 7. Source priority
-
-Knowledge base cố tình gắn priority:
-
-1. LMS page/text của giảng viên
-2. Slide + lecture PDF
-3. Transcript video/subtitle
-4. Textbook/reference
-
-Mục tiêu là AI học theo scope/cách dạy của môn trước, rồi mới dùng sách để bổ sung.
-
-## 8. Gợi ý workflow thực tế
-
-Lần đầu:
-
-```text
-Downloader → raw
-prepare_ai_course → AI_Knowledge
+```powershell
+python -m bklms_downloader.ai_study_pack `
+  --validate-ai-pack "D:\University\unpacked-study-pack"
 ```
 
-Khi giảng viên up thêm file:
-
-```text
-Downloader chạy lại → raw được cập nhật
-prepare_ai_course chạy lại --force → rebuild AI_Knowledge
-```
-
-Nếu video chưa cần ngay, chạy prepare không `--transcribe` trước cho nhanh. Khi có thời gian, chạy lại với transcript để tăng chất lượng AI tutor.
+The application uses the same pipeline for **Công cụ -> Chuẩn bị cho AI** and
+creates one independent ZIP for every selected course. Temporary extraction and
+intermediate files are removed after success or failure; completed ZIPs from
+earlier courses remain when a later course fails or cancellation is requested.

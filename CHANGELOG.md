@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.1.4 - 2026-09-10
+
+- Preserve saved course/settings state when an atomic JSON write or replacement
+  fails, and surface sync metadata persistence errors without losing download
+  statistics.
+- Keep valid downloaded files during replacement failures, use unique partial
+  files with bounded streaming reads, and follow redirects within one opening
+  deadline without retrying malformed or unsafe schemes.
+- Harden AI `--force` output overlap checks, exact BK-LMS URL validation,
+  Windows-safe filenames, and traceback redaction for credentials/session data.
+- Generate one isolated, source-grounded AI Study Pack ZIP per selected course
+  with numbered tutor bootstrap, roadmap, source index, coverage, and resume files;
+  do not persist `AI_Knowledge` intermediates.
+- Keep cancellation results explicit, retain completed-course statistics, and
+  make GUI event draining, nested scrolling, and modal shutdown resilient to
+  worker and window-lifecycle races.
+
 ## 1.1.3 - 2026-09-07
 
 - Open login Chrome with eager page loading and report browser readiness before

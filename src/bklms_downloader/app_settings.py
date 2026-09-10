@@ -52,8 +52,13 @@ class AppSettings:
         return self.last_output_dir
 
     def set_last_output_dir(self, output: Path | str) -> str:
+        previous = self.last_output_dir
         self.last_output_dir = self.normalize_path(output)
-        self.save()
+        try:
+            self.save()
+        except Exception:
+            self.last_output_dir = previous
+            raise
         return self.last_output_dir
 
     def save(self) -> None:

@@ -10,7 +10,6 @@ import requests
 from .course_store import CourseStore
 from .crawler import DeepDownloader, SyncCancelled
 from .models import Course, CourseSyncResult, SyncBatchResult
-from .utils import extract_course_code
 
 
 EventCallback = Callable[[dict[str, Any]], None]
@@ -85,13 +84,19 @@ class SyncManager:
                     break
 
                 results.append(result)
+                result_authentication_error = self._is_authentication_error(result)
                 if self.store is not None:
                     try:
                         self.store.update_sync(course.id, result)
                     except OSError:
-                        # A metadata write failure must not strand an otherwise
-                        # completed batch in the busy UI state.
-                        pass
+                        result.errors += 1
+                        result.error_message = "Không lưu được trạng thái đồng bộ."
+                        if result.status != "cancelled":
+                            result.status = "error"
+                        self._emit(event_callback, "crawler_event", course=course,
+                                   activity={"event": "error", "message": result.error_message})
+                if result_authentication_error:
+                    authentication_error = True
                 self._emit(
                     event_callback,
                     "course_sync_complete",
@@ -101,9 +106,20 @@ class SyncManager:
                     total=len(course_list),
                 )
 
-                if self._is_authentication_error(result):
+                if result_authentication_error or self._is_authentication_error(result):
                     authentication_error = True
                     break
+                if result.status == "cancelled":
+                    cancelled = True
+                    break
+        except Exception:
+            # A factory/store error must not produce a success-looking terminal
+            # event. Keep the already completed counts visible.
+            if not results or results[-1].course_id != course.id:
+                results.append(self._result(course, course.display_name, None, {}, "error"))
+            results[-1].errors += 1
+            results[-1].status = "error"
+            results[-1].error_message = "Không thể hoàn tất tác vụ đồng bộ."
         finally:
             batch = SyncBatchResult(
                 results,
@@ -130,16 +146,17 @@ class SyncManager:
         def crawler_event(event: dict[str, Any]) -> None:
             self._emit(event_callback, "crawler_event", course=course, activity=event)
 
-        downloader = self.downloader_factory(
-            session=session,
-            output=course.output_path,
-            force=self.force,
-            max_depth=self.max_depth,
-            follow_linked_courses=self.follow_linked_courses,
-            event_callback=crawler_event,
-            cancel_event=cancel_event,
-        )
+        downloader = None
         try:
+            downloader = self.downloader_factory(
+                session=session,
+                output=course.output_path,
+                force=self.force,
+                max_depth=self.max_depth,
+                follow_linked_courses=self.follow_linked_courses,
+                event_callback=crawler_event,
+                cancel_event=cancel_event,
+            )
             output = downloader.crawl_course(course.url, course.output_path, depth=0)
             stats = dict(downloader.stats)
             name = getattr(downloader, "root_course_name", None) or course.display_name
@@ -151,7 +168,10 @@ class SyncManager:
             )
             return self._result(course, name, Path(output), stats, status)
         except SyncCancelled:
-            raise
+            return self._result(
+                course, course.display_name, getattr(downloader, "root_course_dir", None),
+                dict(getattr(downloader, "stats", {})), "cancelled",
+            )
         except Exception as exc:
             stats = dict(getattr(downloader, "stats", {}))
             stats["errors"] = max(1, int(stats.get("errors", 0)))

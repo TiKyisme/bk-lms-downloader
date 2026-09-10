@@ -10,6 +10,9 @@ class FakeResponse:
         self.content = content
         self.text = content.decode("utf-8", errors="replace")
         self.encoding = "utf-8"
+        self.status_code = 200
+        self.raw = None
+        self.is_redirect = False
         self.headers = {"Content-Type": content_type}
         if filename:
             self.headers["Content-Disposition"] = f'attachment; filename="{filename}"'

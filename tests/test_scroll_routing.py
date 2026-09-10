@@ -79,6 +79,18 @@ def test_modal_scroll_region_is_preferred_over_main_page():
 class FakeToplevel:
     def __init__(self):
         self.calls = []
+        self.tags = ("widget", "class", "all")
+
+    def bindtags(self, tags=None):
+        if tags is not None:
+            self.tags = tags
+        return self.tags
+
+    def winfo_children(self):
+        return []
+
+    def bind_class(self, tag, sequence, callback):
+        self.calls.append((sequence, callback, tag))
 
     def bind_all(self, sequence, callback, add=False):
         self.calls.append((sequence, callback, add))
@@ -96,8 +108,10 @@ def test_wheel_bindings_are_installed_once_not_on_refresh():
         "<MouseWheel>",
         "<Button-4>",
         "<Button-5>",
+        "<Map>",
     ]
-    assert all(call[2] is False for call in toplevel.calls)
+    assert toplevel.tags[0].startswith("ExclusiveWheel")
+    assert toplevel.tags[-1] == "all"
 
 
 class BoundaryTarget:

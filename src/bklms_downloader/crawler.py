@@ -3,12 +3,14 @@ from __future__ import annotations
 import json
 import re
 import time
+import tempfile
 from pathlib import Path
 from threading import Event
 from typing import Callable, Iterable, Optional
 from urllib.parse import urljoin, urlparse
 
 import requests
+from urllib3.response import HTTPResponse
 from bs4 import BeautifulSoup
 
 from .config import (
@@ -147,6 +149,9 @@ class DeepDownloader:
 
     @staticmethod
     def _retryable(exc: requests.RequestException, status_code: int) -> bool:
+        if isinstance(exc, (requests.exceptions.SSLError, requests.exceptions.InvalidURL,
+                            requests.exceptions.InvalidSchema, requests.exceptions.MissingSchema)):
+            return False
         if isinstance(exc, (requests.ConnectionError, requests.Timeout)):
             return True
         return isinstance(exc, requests.HTTPError) and (
@@ -183,15 +188,45 @@ class DeepDownloader:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise self._timeout_error(name)
-                response = self.session.get(
-                    url,
-                    stream=True,
-                    allow_redirects=True,
-                    timeout=(
-                        min(REQUEST_CONNECT_TIMEOUT, max(1, remaining)),
-                        min(REQUEST_READ_TIMEOUT, max(1, remaining)),
-                    ),
-                )
+                current_url = url
+                redirects_followed = 0
+                while True:
+                    self._check_cancelled()
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise self._timeout_error(name)
+                    response = self.session.get(
+                        current_url, stream=True, allow_redirects=False,
+                        timeout=(min(REQUEST_CONNECT_TIMEOUT, max(0.1, remaining)),
+                                 min(REQUEST_READ_TIMEOUT, max(0.1, remaining))),
+                    )
+                    self._check_cancelled()
+                    if time.monotonic() > deadline:
+                        raise self._timeout_error(name)
+                    if response.status_code in {301, 302, 303, 307, 308} and not response.is_redirect:
+                        response.close()
+                        response = None
+                        raise requests.exceptions.InvalidURL("Redirect response missing Location")
+                    if not response.is_redirect:
+                        break
+                    if redirects_followed >= 6:
+                        response.close()
+                        response = None
+                        raise requests.TooManyRedirects(
+                            "Resource exceeded redirect limit"
+                        )
+                    location = response.headers.get("Location")
+                    if not location:
+                        response.close()
+                        response = None
+                        raise requests.exceptions.InvalidURL("Redirect response missing Location")
+                    next_url = urljoin(current_url, location)
+                    response.close()
+                    response = None
+                    if urlparse(next_url).scheme not in {"http", "https"}:
+                        raise requests.exceptions.InvalidSchema("Unsupported redirect scheme")
+                    current_url = next_url
+                    redirects_followed += 1
                 response.raise_for_status()
                 if "/login/" in urlparse(response.url).path.lower():
                     response.close()
@@ -241,7 +276,7 @@ class DeepDownloader:
         name = self._resource_name(resource_name)
         deadline = time.monotonic() + HTML_RESPONSE_DEADLINE
         chunks: list[bytes] = []
-        for chunk in response.iter_content(64 * 1024):
+        for chunk in self._response_chunks(response, 64 * 1024):
             self._check_cancelled()
             if time.monotonic() > deadline:
                 raise self._timeout_error(name)
@@ -251,6 +286,21 @@ class DeepDownloader:
         if time.monotonic() > deadline:
             raise self._timeout_error(name)
         return b"".join(chunks)
+
+    @staticmethod
+    def _response_chunks(response, size):
+        if isinstance(response.raw, HTTPResponse):
+            # iter_content/read(256KiB) can wait indefinitely for a full chunk
+            # while the server dribbles bytes. read1 returns available data,
+            # giving the outer loop a cancellation/deadline checkpoint.
+            while True:
+                data = response.raw.read1(size, decode_content=True)
+                if not data:
+                    return
+                yield data
+        else:
+            # Buffered responses and test/custom adapters.
+            yield from response.iter_content(size)
 
     def read_response_text(
         self,
@@ -296,6 +346,14 @@ class DeepDownloader:
         context: str,
         prefix: str = "",
     ) -> Optional[Path]:
+        try:
+            return self._save_response_file(response, dest_dir, fallback, source, context, prefix)
+        finally:
+            response.close()
+
+    def _save_response_file(
+        self, response, dest_dir, fallback, source, context, prefix,
+    ) -> Optional[Path]:
         if is_video_response(response):
             self.stats["skipped_video"] += 1
             self.log(
@@ -306,7 +364,6 @@ class DeepDownloader:
             )
             self.emit("video_skipped", f"Bỏ qua video: {fallback}", source=source)
             print(f"    [VIDEO SKIP] {fallback}")
-            response.close()
             return None
 
         dest_dir.mkdir(parents=True, exist_ok=True)
@@ -335,11 +392,12 @@ class DeepDownloader:
                     f"Đã có: {target.name}",
                     path=str(target),
                 )
-                response.close()
                 return target
 
         self._check_cancelled()
-        temp = target.with_suffix(target.suffix + ".part")
+        # Own a unique partial: never truncate/delete another run's partial.
+        with tempfile.NamedTemporaryFile(dir=dest_dir, prefix=".download-", suffix=".part", delete=False) as handle:
+            temp = Path(handle.name)
         deadline = time.monotonic() + self._stream_total_timeout(response)
         last_heartbeat = time.monotonic()
         bytes_written = 0
@@ -351,7 +409,7 @@ class DeepDownloader:
         )
         try:
             with temp.open("wb") as file_obj:
-                for chunk in response.iter_content(256 * 1024):
+                for chunk in self._response_chunks(response, 256 * 1024):
                     self._check_cancelled()
                     now = time.monotonic()
                     if now > deadline:
@@ -373,8 +431,7 @@ class DeepDownloader:
             if time.monotonic() > deadline:
                 raise self._timeout_error(filename)
 
-            if target.exists():
-                target.unlink()
+            # os.replace semantics preserve the old file if promotion fails.
             temp.replace(target)
 
             size = target.stat().st_size
@@ -410,8 +467,6 @@ class DeepDownloader:
                 except OSError:
                     pass
             raise
-        finally:
-            response.close()
 
     def download_media_links(
         self,

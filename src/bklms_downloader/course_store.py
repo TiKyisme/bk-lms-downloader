@@ -8,6 +8,8 @@ import uuid
 from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
+from functools import wraps
+from threading import RLock
 
 from .models import Course, CourseSyncResult
 from .platform_support import user_config_dir
@@ -17,6 +19,23 @@ from .app_logging import get_logger
 
 SCHEMA_VERSION = 1
 LOG = get_logger(__name__)
+
+
+def persisted_change(method):
+    """Restore both list membership and existing row objects on failed writes."""
+    @wraps(method)
+    def apply(self, *args, **kwargs):
+        with self._lock:
+            courses = list(self._courses)
+            snapshots = [vars(course).copy() for course in courses]
+            try:
+                return method(self, *args, **kwargs)
+            except Exception:
+                self._courses = courses
+                for course, values in zip(courses, snapshots):
+                    vars(course).update(values)
+                raise
+    return apply
 
 
 def default_courses_path() -> Path:
@@ -30,6 +49,7 @@ class CourseStore:
     def __init__(self, path: Path | None = None):
         self.path = Path(path) if path is not None else default_courses_path()
         self._courses: list[Course] = []
+        self._lock = RLock()
         self.load()
 
     def load(self) -> list[Course]:
@@ -72,6 +92,7 @@ class CourseStore:
     def get(self, course_id: str) -> Course | None:
         return next((course for course in self._courses if course.id == course_id), None)
 
+    @persisted_change
     def add(
         self,
         url: str,
@@ -99,6 +120,7 @@ class CourseStore:
         self.save()
         return course
 
+    @persisted_change
     def add_many(
         self,
         entries: Iterable[tuple[str, Path | str, str, str]],
@@ -141,6 +163,7 @@ class CourseStore:
             raise
         return prepared
 
+    @persisted_change
     def edit(self, course_id: str, **changes: object) -> Course:
         course = self._require(course_id)
         if "url" in changes:
@@ -163,6 +186,7 @@ class CourseStore:
         self.save()
         return course
 
+    @persisted_change
     def remove_many(self, course_ids: Iterable[str]) -> list[Course]:
         """Remove saved-course records in one persistence write, if any exist.
 
@@ -179,6 +203,7 @@ class CourseStore:
         self.save()
         return removed
 
+    @persisted_change
     def clear(self) -> list[Course]:
         """Persist an empty saved-course list without deleting downloaded files."""
         removed = self.list()
@@ -186,6 +211,7 @@ class CourseStore:
         self.save()
         return removed
 
+    @persisted_change
     def update_sync(self, course_id: str, result: CourseSyncResult) -> Course:
         course = self._require(course_id)
         course.last_sync = datetime.now().astimezone().isoformat(timespec="seconds")

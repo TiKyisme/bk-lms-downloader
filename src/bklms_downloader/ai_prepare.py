@@ -14,7 +14,7 @@ from types import ModuleType, SimpleNamespace
 from typing import Callable, Iterable
 
 from .app_logging import get_logger
-from .ai_study_pack import validate_ai_study_pack
+from .ai_study_pack import NAVIGATION_FILES, validate_ai_study_pack
 from .models import Course
 
 
@@ -36,6 +36,10 @@ class AIPreparationError(RuntimeError):
     pass
 
 
+class AIPreparationCancelled(AIPreparationError):
+    """The learner cancelled before the current course became an archive."""
+
+
 def missing_ai_dependencies(
     importer: Callable[[str], object] = importlib.import_module,
 ) -> list[str]:
@@ -53,8 +57,9 @@ def missing_ai_dependencies(
     return missing
 
 
-def default_ai_output(course_root: Path) -> Path:
-    return course_root / "AI_Knowledge"
+def default_ai_archive_destination(course_root: Path) -> Path:
+    """Return the parent directory where the course ZIP is finalized."""
+    return Path(course_root).expanduser().resolve().parent
 
 
 def default_ai_tool_path() -> Path:
@@ -99,75 +104,107 @@ def _ai_runtime_self_test() -> Path:
         raise RuntimeError("Bundled AI preparation tool is missing")
 
     with tempfile.TemporaryDirectory(prefix="bklms_ai_smoke_") as temp_dir:
-        course_root = Path(temp_dir) / "Course"
-        course_root.mkdir()
-        (course_root / "notes.txt").write_text("AI runtime smoke", encoding="utf-8")
+        base = Path(temp_dir)
 
-        html_dir = course_root / "Web Page"
-        html_dir.mkdir()
-        (html_dir / "content.html").write_text(
-            "<h1>Packaged HTML smoke</h1><p>Local extraction.</p>",
-            encoding="utf-8",
+        def seed_course(course_root: Path, title: str, marker: str) -> None:
+            course_root.mkdir()
+            (course_root / "notes.txt").write_text(marker, encoding="utf-8")
+            html_dir = course_root / "Web Page"
+            html_dir.mkdir()
+            (html_dir / "content.html").write_text(
+                f"<h1>{title}</h1><p>{marker}</p>",
+                encoding="utf-8",
+            )
+
+            from pypdf import PdfWriter
+
+            pdf_writer = PdfWriter()
+            pdf_writer.add_blank_page(width=72, height=72)
+            with (course_root / "tiny.pdf").open("wb") as pdf_handle:
+                pdf_writer.write(pdf_handle)
+
+            from pptx import Presentation
+
+            presentation = Presentation()
+            slide = presentation.slides.add_slide(presentation.slide_layouts[1])
+            slide.shapes.title.text = f"{title} visual source"
+            presentation.save(course_root / "tiny.pptx")
+
+        specs = (
+            ("A", "AI runtime course A", "PACKAGED_COURSE_A_ONLY"),
+            ("B", "AI runtime course B", "PACKAGED_COURSE_B_ONLY"),
         )
+        courses: list[Course] = []
+        expected_markers: dict[str, str] = {}
+        for suffix, title, marker in specs:
+            course_root = base / f"Course {suffix}"
+            seed_course(course_root, title, marker)
+            courses.append(
+                Course(
+                    id=f"ai-self-test-{suffix.lower()}",
+                    url=f"https://lms.hcmut.edu.vn/course/view.php?id={suffix}",
+                    output=str(course_root),
+                    name=title,
+                )
+            )
+            expected_markers[title] = marker
 
-        from pypdf import PdfWriter
-
-        pdf_writer = PdfWriter()
-        pdf_writer.add_blank_page(width=72, height=72)
-        with (course_root / "tiny.pdf").open("wb") as pdf_handle:
-            pdf_writer.write(pdf_handle)
-
-        from pptx import Presentation
-
-        presentation = Presentation()
-        slide = presentation.slides.add_slide(presentation.slide_layouts[1])
-        slide.shapes.title.text = "Packaged PPTX smoke"
-        presentation.save(course_root / "tiny.pptx")
-
-        course = Course(
-            id="ai-self-test",
-            url="https://lms.hcmut.edu.vn/course/view.php?id=1",
-            output=str(course_root),
-            name="AI runtime self-test",
-        )
         batch = AIBatchPreparer().prepare_courses(
-            [course],
+            courses,
             lambda item: item.output_path,
         )
-        if len(batch.succeeded) != 1 or batch.failed:
-            detail = batch.failed[0].error if batch.failed else "unknown batch failure"
+        pack_paths = [result.output for result in batch.succeeded if result.output is not None]
+        if len(pack_paths) != 2 or batch.failed or batch.cancelled:
+            detail = batch.failed[0].error if batch.failed else "wrong packaged batch result"
             raise RuntimeError("AI batch self-test failed: " + (detail or "unknown error"))
-        output = batch.succeeded[0].output
-        if output is None:
-            raise RuntimeError("AI batch self-test returned no output")
-        required_outputs = (
-            output / "START_HERE.md",
-            output / "COURSE_MAP.md",
-            output / "COVERAGE_REPORT.md",
-            output / "TUTOR_PROTOCOL.md",
-            output / "CHATGPT_START_PROMPT.txt",
-            output / "AI_TUTOR_CONTEXT.md",
-            output / "course_index.md",
-            output / "processing_report.md",
-            output / "meta" / "corpus.jsonl",
-        )
-        if not all(path.is_file() for path in required_outputs):
-            raise RuntimeError("AI runtime self-test did not create required outputs")
-        validation = validate_ai_study_pack(output)
-        if validation.errors:
-            raise RuntimeError("AI Study Pack validation failed: " + "; ".join(validation.errors))
-        packs = list(output.parent.glob("* - AI Study Pack.zip"))
-        if len(packs) != 1:
-            raise RuntimeError("AI runtime self-test did not create one ChatGPT-ready ZIP")
-        with tempfile.TemporaryDirectory(prefix="bklms_ai_pack_roundtrip_") as unpacked:
-            with zipfile.ZipFile(packs[0]) as archive:
-                archive.extractall(unpacked)
-            unpacked_validation = validate_ai_study_pack(Path(unpacked))
-        if unpacked_validation.errors:
-            raise RuntimeError(
-                "AI Study Pack ZIP round-trip failed: " + "; ".join(unpacked_validation.errors)
-            )
-        return output
+        if len(list(base.glob("*_AI_Study_Pack*.zip"))) != 2:
+            raise RuntimeError("AI runtime self-test did not create exactly two ZIPs")
+        if list(base.rglob("*.zip.part")):
+            raise RuntimeError("AI runtime self-test left a partial ZIP")
+        if any(path.name.casefold() == "ai_knowledge" for path in base.rglob("*")):
+            raise RuntimeError("AI runtime self-test left legacy AI_Knowledge output")
+
+        legacy_names = {
+            "START_HERE.md",
+            "COURSE_MAP.md",
+            "TUTOR_PROTOCOL.md",
+            "COVERAGE_REPORT.md",
+            "AI_TUTOR_CONTEXT.md",
+            "CHATGPT_START_PROMPT.txt",
+        }
+        for pack in pack_paths:
+            if not pack.is_file() or pack.suffix.lower() != ".zip":
+                raise RuntimeError("AI runtime self-test returned an invalid ZIP")
+            with zipfile.ZipFile(pack) as archive:
+                names = set(archive.namelist())
+                if not all(name in names for name in NAVIGATION_FILES):
+                    raise RuntimeError("AI runtime self-test did not create required navigation")
+                if any(name in legacy_names for name in names):
+                    raise RuntimeError("AI runtime self-test included legacy navigation")
+                if not any(name.startswith("sources/") for name in names):
+                    raise RuntimeError("AI runtime self-test did not retain source evidence")
+                text = "\n".join(
+                    archive.read(name).decode("utf-8", errors="replace")
+                    for name in names
+                    if name.lower().endswith((".md", ".txt", ".jsonl", ".json"))
+                )
+                own_marker = next(
+                    marker for marker in expected_markers.values() if marker in text
+                )
+                other_markers = [
+                    marker for marker in expected_markers.values() if marker != own_marker
+                ]
+                if any(marker in text for marker in other_markers):
+                    raise RuntimeError("AI runtime self-test mixed course source data")
+            with tempfile.TemporaryDirectory(prefix="bklms_ai_pack_roundtrip_") as unpacked:
+                with zipfile.ZipFile(pack) as archive:
+                    archive.extractall(unpacked)
+                unpacked_validation = validate_ai_study_pack(Path(unpacked))
+            if unpacked_validation.errors:
+                raise RuntimeError(
+                    "AI Study Pack ZIP round-trip failed: " + "; ".join(unpacked_validation.errors)
+                )
+        return pack_paths[0]
 
 
 def run_ai_runtime_self_test() -> int:
@@ -184,7 +221,7 @@ def run_ai_runtime_self_test() -> int:
     error_log.unlink(missing_ok=True)
     Path("ai-self-test-diagnostics.log").write_text(
         ai_runtime_diagnostics()
-        + f"\nSynthetic batch: OK\nAI Study Pack: OK\nAI_Knowledge: {output}\n",
+        + f"\nSynthetic batch: OK\nAI Study Pack: {output}\n",
         encoding="utf-8",
     )
     return 0
@@ -203,7 +240,7 @@ def run_ai_runtime_diagnostics() -> int:
         )
         return 1
     error_log.unlink(missing_ok=True)
-    report += f"\nSynthetic batch: OK\nAI Study Pack: OK\nAI_Knowledge: {output}"
+    report += f"\nSynthetic batch: OK\nAI Study Pack: {output}"
     Path("ai-self-test-diagnostics.log").write_text(report + "\n", encoding="utf-8")
     try:
         print(report)
@@ -244,7 +281,14 @@ class AICoursePreparer:
         self.pipeline_loader = pipeline_loader
         self._pipeline: ModuleType | None = None
 
-    def prepare(self, course_root: Path, output: Path | None = None) -> Path:
+    def prepare(
+        self,
+        course_root: Path,
+        output: Path | None = None,
+        *,
+        course_name: str | None = None,
+        cancel_event=None,
+    ) -> Path:
         missing = missing_ai_dependencies(self.dependency_importer)
         if missing:
             raise OptionalAIDependenciesError(
@@ -254,10 +298,11 @@ class AICoursePreparer:
         source_root = Path(course_root).expanduser().resolve()
         if not source_root.is_dir():
             raise AIPreparationError("Không tìm thấy thư mục course đã tải.")
-        destination = Path(output or default_ai_output(source_root)).expanduser().resolve()
-        expected_destination = default_ai_output(source_root).resolve()
-        if destination != expected_destination:
-            raise AIPreparationError("AI_Knowledge phải nằm trong thư mục course đã tải.")
+        destination = Path(output or default_ai_archive_destination(source_root)).expanduser().resolve()
+        if destination == source_root or source_root in destination.parents:
+            raise AIPreparationError("Thư mục đích ZIP không được nằm trong course đã tải.")
+        if destination == Path(destination.anchor) or destination == Path.home().resolve():
+            raise AIPreparationError("Thư mục đích ZIP không hợp lệ.")
         if not self.script_path.is_file():
             raise AIPreparationError("Không tìm thấy thành phần chuẩn bị AI trong ứng dụng.")
 
@@ -268,20 +313,41 @@ class AICoursePreparer:
             # when embedded in the GUI so a Windows legacy console encoding can
             # never abort a local knowledge-base build.
             with redirect_stdout(io.StringIO()):
-                pipeline.run_preparation(_pipeline_arguments(source_root, destination))
+                output_path = pipeline.run_preparation(
+                    _pipeline_arguments(
+                        source_root,
+                        destination,
+                        course_name or source_root.name,
+                        cancel_event,
+                    )
+                )
+        except AIPreparationCancelled:
+            raise
         except AIPreparationError:
             raise
         except Exception as exc:
+            if type(exc).__name__ == "PreparationCancelled":
+                raise AIPreparationCancelled("Đã hủy chuẩn bị AI.") from exc
             LOG.exception("AI preparation failed for %s", source_root)
             raise AIPreparationError("Không thể chuẩn bị course cho AI. Hãy thử lại sau.") from exc
-        return destination
+        if not isinstance(output_path, Path) or output_path.suffix.lower() != ".zip":
+            raise AIPreparationError("Chuẩn bị AI không tạo được ZIP hợp lệ.")
+        return output_path
 
 
-def _pipeline_arguments(course_root: Path, destination: Path) -> SimpleNamespace:
+def _pipeline_arguments(
+    course_root: Path,
+    destination: Path,
+    course_name: str,
+    cancel_event=None,
+) -> SimpleNamespace:
     """Keep GUI preparation local and deterministic: no transcription or cloud."""
     return SimpleNamespace(
         input=course_root,
         output=destination,
+        archive_destination=destination,
+        course_name=course_name,
+        cancel_event=cancel_event,
         include_references=False,
         transcribe=False,
         whisper_model="small",
@@ -308,6 +374,7 @@ class AICoursePreparationResult:
 @dataclass(frozen=True)
 class AIBatchPreparationResult:
     results: list[AICoursePreparationResult]
+    cancelled: bool = False
 
     @property
     def succeeded(self) -> list[AICoursePreparationResult]:
@@ -323,7 +390,7 @@ CourseRootResolver = Callable[[Course], Path]
 
 
 class AIBatchPreparer:
-    """Prepare independent per-course knowledge bases sequentially and safely."""
+    """Prepare independent per-course ZIP archives sequentially and safely."""
 
     def __init__(self, preparer_factory: Callable[[], AICoursePreparer] = AICoursePreparer):
         self.preparer_factory = preparer_factory
@@ -333,6 +400,7 @@ class AIBatchPreparer:
         courses: Iterable[Course],
         course_root_for: CourseRootResolver,
         progress_callback: AIProgressCallback | None = None,
+        cancel_event=None,
     ) -> AIBatchPreparationResult:
         course_list = list(courses)
         if not course_list:
@@ -341,11 +409,22 @@ class AIBatchPreparer:
         preparer = self.preparer_factory()
         results: list[AICoursePreparationResult] = []
         total = len(course_list)
+        cancelled = False
         for index, course in enumerate(course_list, start=1):
+            if cancel_event is not None and cancel_event.is_set():
+                cancelled = True
+                break
             self._emit(progress_callback, "ai_prepare_course_start", course=course, index=index, total=total)
             try:
-                output = preparer.prepare(course_root_for(course))
+                output = preparer.prepare(
+                    course_root_for(course),
+                    course_name=course.display_name,
+                    cancel_event=cancel_event,
+                )
                 result = AICoursePreparationResult(course=course, output=output)
+            except AIPreparationCancelled:
+                cancelled = True
+                break
             except Exception as exc:
                 LOG.exception("AI preparation failed for course %s", course.id)
                 result = AICoursePreparationResult(
@@ -360,7 +439,10 @@ class AIBatchPreparer:
                 index=index,
                 total=total,
             )
-        return AIBatchPreparationResult(results)
+            if cancel_event is not None and cancel_event.is_set():
+                cancelled = True
+                break
+        return AIBatchPreparationResult(results, cancelled=cancelled)
 
     @staticmethod
     def _emit(callback: AIProgressCallback | None, event: str, **payload) -> None:

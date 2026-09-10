@@ -101,17 +101,21 @@ def discover_courses(
     to inspect a page whose cards are rendered after the initial HTML response.
     """
     url = urljoin(base_url.rstrip("/") + "/", MY_COURSES_PATH.lstrip("/"))
+    response = None
     try:
         response = session.get(url, timeout=timeout)
         response.raise_for_status()
+        if "/login/" in urlparse(response.url).path.lower():
+            raise SessionExpiredError("Hãy đăng nhập lại BK-LMS.")
+        return parse_discovered_courses(response.text, response.url)
     except requests.RequestException as exc:
         raise CourseDiscoveryError(
             "Không thể đọc danh sách môn học. Bạn vẫn có thể thêm course bằng URL."
         ) from exc
 
-    if "/login/" in urlparse(response.url).path.lower():
-        raise SessionExpiredError("Hãy đăng nhập lại BK-LMS.")
-    return parse_discovered_courses(response.text, response.url)
+    finally:
+        if response is not None:
+            response.close()
 
 
 def discover_courses_with_browser_fallback(

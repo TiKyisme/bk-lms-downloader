@@ -3,8 +3,8 @@
 r"""
 prepare_ai_course.py
 ====================
-Biến thư mục tải thô từ BK-LMS Downloader thành knowledge base gọn, có cấu trúc,
-phù hợp để feed cho AI tutor / RAG.
+Biến một thư mục tải thô từ BK-LMS Downloader thành một ZIP AI Study Pack
+tự chứa cho đúng một course.
 
 Không gọi LLM/API. Toàn bộ preprocessing chạy local.
 
@@ -19,13 +19,12 @@ Hỗ trợ:
 - Tự phân nhóm 00_course, Chapter 1..N, other.
 - Tách reference books khỏi lecture corpus theo mặc định.
 - Sinh Markdown chuẩn hóa + chunks JSONL để làm RAG.
-- Sinh AI_TUTOR_CONTEXT.md, course_index.md, references_index.md,
-  transcription_queue.md và manifest.
+- Sinh bộ điều hướng tutor, source index, coverage tracker, resume state và manifest.
 
 Ví dụ PowerShell:
     python prepare_ai_course.py `
       --input "C:\...\MMT\test_v2\Mạng máy tính (...)" `
-      --output "C:\...\MMT\AI_Knowledge"
+      --output "C:\...\MMT"
 
 Transcript video:
     python prepare_ai_course.py ... --transcribe --whisper-model small
@@ -90,7 +89,7 @@ SKIP_DIR_NAMES = {
     "node_modules",
     "duylms_forum_debug",
 }
-STUDY_PACK_SUFFIX = " - AI Study Pack.zip"
+STUDY_PACK_SUFFIXES = (" - AI Study Pack.zip", "_AI_Study_Pack.zip")
 
 REFERENCE_HINTS = (
     "textbook",
@@ -171,6 +170,10 @@ class ChunkRecord:
     text: str
     chunk_path: str
     chapters: list[int] = field(default_factory=list)
+
+
+class PreparationCancelled(RuntimeError):
+    """Raised before finalization when the caller cancels this course."""
 
 
 # -----------------------------------------------------------------------------
@@ -366,15 +369,13 @@ def prepare_input(input_path: Path, work_dir: Path) -> tuple[Path, Optional[Path
 
 def iter_source_files(root: Path) -> list[Path]:
     results: list[Path] = []
-    for path in root.rglob("*"):
-        if not path.is_file():
-            continue
-        if any(part in SKIP_DIR_NAMES for part in path.parts):
-            continue
-        if path.name.endswith(STUDY_PACK_SUFFIX):
-            continue
-        # Ignore downloader metadata as teaching content; still index separately later.
-        results.append(path)
+    for directory, subdirectories, filenames in os.walk(root):
+        # Prune generated output BEFORE traversing thousands of old chunks.
+        subdirectories[:] = [name for name in subdirectories if name not in SKIP_DIR_NAMES]
+        for filename in filenames:
+            path = Path(directory) / filename
+            if path.is_file() and not any(filename.endswith(suffix) for suffix in STUDY_PACK_SUFFIXES):
+                results.append(path)
     return sorted(results, key=lambda p: p.as_posix().lower())
 
 
@@ -768,6 +769,7 @@ class CoursePreparer:
         self.args = args
         self.source_root = source_root
         self.output_root = output_root
+        self.archive_destination = getattr(args, "archive_destination", None)
 
         self.docs_dir = output_root / "documents"
         self.chunks_dir = output_root / "chunks"
@@ -784,7 +786,12 @@ class CoursePreparer:
         self.seen_content_hashes: dict[str, str] = {}
         self.whisper_model_cache: dict = {}
 
-        self.course_name = source_root.name
+        self.course_name = getattr(args, "course_name", source_root.name)
+
+    def check_cancelled(self) -> None:
+        cancel_event = getattr(self.args, "cancel_event", None)
+        if cancel_event is not None and cancel_event.is_set():
+            raise PreparationCancelled("AI preparation cancelled")
 
     def register_record(self, record: DocumentRecord) -> None:
         if not record.chapters:
@@ -1138,6 +1145,7 @@ class CoursePreparer:
         )
 
     def process(self) -> None:
+        self.check_cancelled()
         files = iter_source_files(self.source_root)
         print(f"[2/6] Source root: {self.source_root}")
         print(f"      Phát hiện {len(files)} file")
@@ -1166,6 +1174,7 @@ class CoursePreparer:
             return (rank, p.as_posix().lower())
 
         for idx, path in enumerate(sorted(files, key=order_key), start=1):
+            self.check_cancelled()
             ext = path.suffix.lower()
             source_path = rel(path, self.source_root)
 
@@ -1214,13 +1223,10 @@ class CoursePreparer:
                 )
 
         print("[3/6] Sinh manifests/chunks...")
+        self.check_cancelled()
         self.write_manifests()
-        print("[4/6] Sinh course_index.md...")
-        self.write_course_index()
-        print("[5/6] Sinh AI_TUTOR_CONTEXT.md...")
-        self.write_ai_tutor_context()
-        print("[6/6] Sinh reports phụ...")
-        self.write_reports()
+        print("[4/6] Sinh tutor navigation...")
+        self.check_cancelled()
         self.write_study_pack_outputs()
 
     def write_manifests(self) -> None:
@@ -1270,186 +1276,6 @@ class CoursePreparer:
             encoding="utf-8",
         )
 
-    def write_course_index(self) -> None:
-        ready = [r for r in self.records if r.status == "ready"]
-        groups: dict[str, list[DocumentRecord]] = defaultdict(list)
-        for r in ready:
-            groups[r.group].append(r)
-
-        def group_sort_key(name: str):
-            if name == "00_course":
-                return (0, 0)
-            m = re.match(r"chapter_(\d+)", name)
-            if m:
-                return (1, int(m.group(1)))
-            if name == "references":
-                return (2, 0)
-            return (3, 0)
-
-        lines = [
-            f"# Course Index — {self.course_name}",
-            "",
-            "Knowledge base generated from the raw LMS download.",
-            "",
-            "## Source priority",
-            "",
-            "1. LMS pages / lecturer-authored course text",
-            "2. Lecture slides / lecture PDFs",
-            "3. Video transcripts / subtitles",
-            "4. Textbooks and external references",
-            "",
-        ]
-
-        for group_name in sorted(groups, key=group_sort_key):
-            label = (
-                "Course information"
-                if group_name == "00_course"
-                else group_name.replace("_", " ").title()
-            )
-            lines.extend([f"## {label}", ""])
-            for r in sorted(groups[group_name], key=lambda x: (x.priority, x.title.lower())):
-                lines.append(
-                    f"- **P{r.priority} · {r.source_type}** — {r.title} "
-                    f"(`{r.source_id}`; `{r.source_path}`)"
-                )
-            lines.append("")
-
-        write_text(self.output_root / "course_index.md", "\n".join(lines))
-
-    def write_ai_tutor_context(self) -> None:
-        chapter_sets = sorted(
-            {tuple(record.chapters) for record in self.records if record.chapters},
-            key=lambda values: values,
-        )
-        chapter_text = ", ".join(
-            str(values[0]) if len(values) == 1 else "–".join(map(str, values))
-            for values in chapter_sets
-        ) or "not detected"
-        detected = {chapter for values in chapter_sets for chapter in values}
-        gaps = [chapter for chapter in range(min(detected), max(detected) + 1) if chapter not in detected] if detected else []
-
-        text = f"""# AI Tutor Context — {self.course_name}
-
-## Purpose
-
-This folder is an AI-ready knowledge base produced from the course's LMS materials. Use it as the primary evidence when teaching, reviewing, generating quizzes, or answering course-specific questions.
-
-## Evidence priority
-
-When multiple sources overlap or disagree, prefer them in this order:
-
-1. **Priority 1 — LMS pages / lecturer-authored course text.** These best reflect the instructor's framing, course rules, grading, exam scope, and terminology.
-2. **Priority 2 — Lecture slides and lecture PDFs.** Use these for the concepts actually emphasized in lectures.
-3. **Priority 3 — Video transcripts / subtitles.** Use these to recover oral explanations and examples from lectures.
-4. **Priority 4 — Textbooks / external references.** Use these for deeper explanation or missing detail, but do not let broader textbook coverage silently override the course scope.
-
-## Teaching rules
-
-- Ground course-specific claims in the supplied sources; do not silently replace the instructor's framing with generic knowledge.
-- When a claim comes from a chunk, cite **source_id + locator** (for example `src_xxx, slide 12`, `src_xxx, page 45`, or `src_xxx, 00:12:31`).
-- If the supplied materials do not support an answer, say that clearly before adding general knowledge.
-- Distinguish **course requirement/exam scope** from **reference enrichment**.
-- Prefer explaining from the chapter's priority 1–3 sources first; retrieve priority 4 only when useful.
-- For practice questions, mirror terminology and emphasis found in lecturer-authored materials.
-- Do not treat `.url` shortcuts as authoritative content; they are navigation references only.
-- Do not assume a video was processed unless a transcript appears in `documents/` or `chunks/`.
-
-## Course organization detected
-
-Detected chapters: **{chapter_text}**.
-{f"Potential source gaps: Chapter {', '.join(map(str, gaps))} was not found in downloaded material." if gaps else "No chapter gap can be inferred from detected source numbering."}
-
-Read `START_HERE.md`, `COURSE_MAP.md`, `COVERAGE_REPORT.md`, and `TUTOR_PROTOCOL.md` before teaching. Use `chapters/` as long-form evidence and `meta/corpus.jsonl` for chunk-level retrieval/embeddings.
-
-## Recommended retrieval strategy
-
-For a question about Chapter N:
-
-1. Search chunks where `chapter == N` and priority <= 3.
-2. Add `00_course` chunks if the question concerns grading, syllabus, deadlines, or exam scope.
-3. Search priority 4 references only if the first two steps are insufficient or the user asks for deeper explanation.
-4. Rank chunks with the same relevance by lower numeric `priority` first.
-
-## Folder contract
-
-- `documents/` — normalized full documents in Markdown.
-- `chunks/` — chunked Markdown with source metadata and locators.
-- `meta/corpus.jsonl` — one JSON object per retrieval chunk; ready for vector DB/RAG import.
-- `meta/documents.jsonl` — processing manifest.
-- `references_index.md` — reference books intentionally not extracted by default.
-- `transcription_queue.md` — media that still needs speech-to-text.
-- `links_index.md` — LMS/external shortcuts kept for navigation, not knowledge ingestion.
-"""
-        write_text(self.output_root / "AI_TUTOR_CONTEXT.md", text)
-
-    def write_reports(self) -> None:
-        # References.
-        lines = [
-            "# References Index",
-            "",
-            "These files are intentionally kept out of the default AI corpus to avoid flooding retrieval with large books. Use `--include-references` if full extraction is desired.",
-            "",
-        ]
-        if self.reference_paths:
-            for x in self.reference_paths:
-                lines.append(
-                    f"- **{x['title']}** — `{x['source_path']}` ({x['size_mb']} MB)"
-                )
-        else:
-            lines.append("_No reference PDFs were indexed-only._")
-        write_text(self.output_root / "references_index.md", "\n".join(lines))
-
-        # Media queue.
-        lines = [
-            "# Transcription Queue",
-            "",
-            "Media below was found but not transcribed. Re-run with `--transcribe` to add it to the AI corpus.",
-            "",
-        ]
-        if self.transcription_queue:
-            for x in self.transcription_queue:
-                lines.append(
-                    f"- **{x['title']}** — `{x['source_path']}` ({x['size_mb']} MB)"
-                )
-        else:
-            lines.append("_No pending media._")
-        write_text(self.output_root / "transcription_queue.md", "\n".join(lines))
-
-        # URL shortcuts.
-        lines = ["# Links Index", ""]
-        if self.links:
-            for x in self.links:
-                url = x["url"] or "(URL not parsed)"
-                lines.append(
-                    f"- **{x['title']}** — {url} — source `{x['source_path']}`"
-                )
-        else:
-            lines.append("_No .url shortcuts found._")
-        write_text(self.output_root / "links_index.md", "\n".join(lines))
-
-        # Errors/skips review.
-        duplicate_count = sum(r.status == "duplicate" for r in self.records)
-        skipped_html = sum(r.status == "skipped_html_duplicate" for r in self.records)
-        skipped_media_stubs = sum(r.status == "skipped_media_stub" for r in self.records)
-        lines = [
-            "# Processing Report",
-            "",
-            f"- Ready documents: {sum(r.status == 'ready' for r in self.records)}",
-            f"- Chunks: {len(self.chunks)}",
-            f"- Duplicate text skipped: {duplicate_count}",
-            f"- HTML skipped because content.txt existed: {skipped_html}",
-            f"- Tiny media activity wrappers skipped: {skipped_media_stubs}",
-            f"- References indexed-only: {len(self.reference_paths)}",
-            f"- Media pending transcription: {len(self.transcription_queue)}",
-            f"- Errors: {len(self.errors)}",
-            "",
-        ]
-        if self.errors:
-            lines.extend(["## Errors", ""])
-            for e in self.errors:
-                lines.append(f"- `{e['source_path']}` — {e['error']}")
-        write_text(self.output_root / "processing_report.md", "\n".join(lines))
-
     def write_study_pack_outputs(self) -> None:
         self.meta_dir.mkdir(parents=True, exist_ok=True)
         (self.meta_dir / "visual_manifest.json").write_text(
@@ -1457,22 +1283,20 @@ For a question about Chapter N:
             encoding="utf-8",
         )
         records = [asdict(record) for record in self.records]
-        write_study_navigation(self.output_root, self.course_name, records)
+        write_study_navigation(
+            self.output_root,
+            self.course_name,
+            records,
+            [asdict(chunk) for chunk in self.chunks],
+        )
         validation = validate_ai_study_pack(self.output_root)
-        lines = ["# AI Study Pack Quality Report", "", "## Structural errors", ""]
-        if validation.errors:
-            lines.extend(f"- {error}" for error in validation.errors)
-        else:
-            lines.append("- None")
-        lines.extend(("", "## Warnings", ""))
-        if validation.warnings:
-            lines.extend(f"- {warning}" for warning in validation.warnings)
-        else:
-            lines.append("- None")
-        write_text(self.output_root / "QUALITY_REPORT.md", "\n".join(lines))
         if validation.errors:
             raise RuntimeError("AI Study Pack validation failed: " + "; ".join(validation.errors))
-        self.study_pack_path = create_chatgpt_study_pack(self.output_root, self.course_name)
+        self.study_pack_path = create_chatgpt_study_pack(
+            self.output_root,
+            self.course_name,
+            self.archive_destination,
+        )
 
 
 # -----------------------------------------------------------------------------
@@ -1481,10 +1305,10 @@ For a question about Chapter N:
 
 def parse_args():
     p = argparse.ArgumentParser(
-        description="Convert raw BK-LMS downloads into an AI-ready course knowledge base."
+        description="Convert one raw BK-LMS course into one local AI Study Pack ZIP."
     )
     p.add_argument("--input", required=True, type=Path, help="Raw course folder or .zip")
-    p.add_argument("--output", required=True, type=Path, help="Destination knowledge-base folder")
+    p.add_argument("--output", required=True, type=Path, help="Destination folder for the final ZIP")
 
     p.add_argument(
         "--include-references",
@@ -1534,7 +1358,7 @@ def parse_args():
     p.add_argument(
         "--force",
         action="store_true",
-        help="Delete existing output folder before generation.",
+        help="Retained for CLI compatibility; existing files are never deleted.",
     )
     return p.parse_args()
 
@@ -1549,41 +1373,54 @@ def validate_args(args) -> None:
 
 
 def run_preparation(args) -> Path:
-    """Run one local knowledge-base build; reusable by the packaged GUI."""
+    """Build one course in a private temporary workspace and return its ZIP."""
     validate_args(args)
 
-    output_root = args.output.expanduser().resolve()
-    if output_root.exists() and args.force:
-        shutil.rmtree(output_root)
-    output_root.mkdir(parents=True, exist_ok=True)
+    input_root = args.input.expanduser().resolve()
+    if not input_root.exists():
+        raise FileNotFoundError("Input does not exist")
+    if input_root.is_dir() and not any(input_root.iterdir()):
+        raise ValueError("Input directory is empty")
 
-    # Temporary extraction sits outside output so --force/re-run remains clean.
+    requested_destination = Path(
+        getattr(args, "archive_destination", None) or args.output
+    ).expanduser().resolve()
+    # Keep compatibility with the old CLI spelling without ever touching that
+    # directory. Existing user-owned AI_Knowledge is not application-owned data.
+    if requested_destination.name.casefold().replace(" ", "_") == "ai_knowledge":
+        requested_destination = requested_destination.parent
+    if requested_destination == Path(requested_destination.anchor) or requested_destination == Path.home().resolve():
+        raise ValueError("Output must not be a filesystem or home root")
+    if requested_destination == input_root or input_root in requested_destination.parents:
+        raise ValueError("Archive destination must not be inside the input")
+
+    # Both ZIP input extraction and the complete study-pack tree are temporary.
+    # Only the atomically finalized ZIP is written to the requested destination.
     with tempfile.TemporaryDirectory(prefix="prepare_ai_course_") as tmp:
         work_dir = Path(tmp)
         source_root, _ = prepare_input(args.input, work_dir)
+        output_root = work_dir / "study_pack"
 
         print("=" * 78)
         print("PREPARE AI COURSE")
         print("=" * 78)
         print(f"Input : {source_root}")
-        print(f"Output: {output_root}")
+        print(f"ZIP destination: {requested_destination}")
         print(f"References: {'extract' if args.include_references else 'index only'}")
         print(f"Media transcript: {'yes' if args.transcribe else 'queue only'}")
         print()
 
+        args.archive_destination = requested_destination
         preparer = CoursePreparer(args, source_root, output_root)
         preparer.process()
+        pack_path = preparer.study_pack_path
 
     print()
     print("=" * 78)
     print("HOÀN TẤT")
     print("=" * 78)
-    print(f"Knowledge base: {output_root}")
-    print(f"AI context     : {output_root / 'AI_TUTOR_CONTEXT.md'}")
-    print(f"Course index   : {output_root / 'course_index.md'}")
-    print(f"RAG corpus     : {output_root / 'meta' / 'corpus.jsonl'}")
-    print(f"Report         : {output_root / 'processing_report.md'}")
-    return output_root
+    print(f"AI Study Pack: {pack_path}")
+    return pack_path
 
 
 def main():

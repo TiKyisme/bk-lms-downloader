@@ -1,4 +1,4 @@
-# BK-LMS Downloader v1.1.3 release checklist
+# BK-LMS Downloader v1.1.4 release checklist
 
 Complete this manual checklist before creating the public tag.
 
@@ -7,7 +7,7 @@ Complete this manual checklist before creating the public tag.
 - [ ] Windows EXE is built as `dist/BK-LMS-Downloader.exe`.
 - [ ] Windows EXE embeds `BK-LMS-Downloader-icon-blue.ico`, verified by the build script.
 - [ ] Release workflow produces Windows, macOS arm64, and macOS x64 assets before one release job.
-- [ ] `python tools/validate_versions.py --tag v1.1.3 --msix-version 1.1.3.0` passes.
+- [ ] `python tools/validate_versions.py --tag v1.1.4 --msix-version 1.1.4.0` passes.
 - [ ] Compare first/cached Chrome startup timings using `--diagnose-chrome`.
 - [ ] Double-click login, reuse a window, close Chrome, then reopen; no duplicate sessions.
 - [ ] Exit the app during startup and verify its controlled browser/service is cleaned up.
@@ -39,7 +39,8 @@ Complete this manual checklist before creating the public tag.
 - [ ] Update notice is checked with a newer/no-newer release scenario.
 - [ ] Prepare multiple checked courses for AI from the packaged EXE.
 - [ ] Prepare all courses for AI from the packaged EXE.
-- [ ] Each course gets its own `AI_Knowledge` folder.
+- [ ] Each selected course gets exactly one `<CourseName>_AI_Study_Pack.zip`.
+- [ ] No persistent `AI_Knowledge` folder or intermediate files are created.
 - [ ] A failure in one course does not stop the remaining AI batch.
 - [ ] Original downloaded files remain untouched by AI preparation.
 - [ ] Packaged EXE requires no Python or pip installation for AI preparation.
@@ -50,12 +51,12 @@ Complete this manual checklist before creating the public tag.
 - [ ] AI Study Pack accounts for every discovered source.
 - [ ] Chapter/module detection works for `Ch1`, `Ch 2`, `Ch3_4`, and `Chapter 3-4`.
 - [ ] Missing chapter gaps are reported without invented content.
-- [ ] START_HERE, COURSE_MAP, COVERAGE_REPORT, chapter documents, and starter prompt exist.
+- [ ] Numbered `00_START_HERE` through `05_RESUME_STATE` files and chapter/source evidence exist.
 - [ ] AI Study Pack ZIP round-trip validator passes with no structural errors.
 - [ ] Study Pack contains no credentials, private absolute metadata paths, or application logs.
 - [ ] Original lecturer visual sources remain accessible from the Study Pack.
-- [ ] Student can identify the AI Study Pack ZIP and starter prompt after preparation.
+- [ ] Student can upload each independent ZIP and the package bootstraps tutoring without a large setup prompt.
 - [ ] GUI has no obsolete current-course Delete or AI modes at common laptop sizes.
 - [ ] No credentials, cookies, or session material are present in repository files or logs.
 - [ ] README screenshot and download instructions are current.
-- [ ] Create `v1.1.3` only after all above smoke tests pass.
+- [ ] Create `v1.1.4` only after all above smoke tests pass.

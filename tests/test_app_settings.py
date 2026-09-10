@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from bklms_downloader.app_settings import AppSettings
 
 
@@ -52,3 +54,22 @@ def test_settings_write_is_atomic_and_contains_no_auth_data(tmp_path: Path):
     assert "password" not in rendered
     assert "cookie" not in rendered
     assert "session" not in rendered
+
+
+def test_setting_rolls_back_when_atomic_replace_fails(tmp_path: Path, monkeypatch):
+    path = tmp_path / "settings.json"
+    old_output = tmp_path / "old"
+    settings = AppSettings(path, default_output=old_output)
+    settings.set_last_output_dir(old_output)
+    original_bytes = path.read_bytes()
+
+    def fail_replace(_source, _destination):
+        raise OSError("replace blocked")
+
+    monkeypatch.setattr("bklms_downloader.app_settings.os.replace", fail_replace)
+    with pytest.raises(OSError, match="replace blocked"):
+        settings.set_last_output_dir(tmp_path / "new")
+
+    assert settings.last_output_dir == str(old_output)
+    assert path.read_bytes() == original_bytes
+    assert list(tmp_path.glob(".settings-*.tmp")) == []

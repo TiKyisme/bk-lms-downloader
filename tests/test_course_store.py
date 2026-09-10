@@ -131,6 +131,45 @@ def test_add_many_skips_duplicates_writes_once_and_rolls_back_on_failure(tmp_pat
     assert original_courses[0].id == existing.id
 
 
+def test_edit_rolls_back_all_fields_and_identity_when_late_validation_fails(tmp_path: Path):
+    store = CourseStore(tmp_path / "courses.json")
+    course = store.add(course_url(3001), tmp_path / "old", name="Old (CO3001)")
+    original = course.__dict__.copy()
+
+    with pytest.raises(ValueError, match="không được để trống"):
+        store.edit(
+            course.id,
+            url=course_url(3002),
+            output="   ",
+            name="New (CO3002)",
+            code="CO3002",
+        )
+
+    assert store.get(course.id) is course
+    assert course.__dict__ == original
+    assert CourseStore(store.path).get(course.id).to_dict() == course.to_dict()
+
+
+def test_replace_failure_preserves_persisted_file_and_in_memory_row(tmp_path: Path, monkeypatch):
+    path = tmp_path / "courses.json"
+    store = CourseStore(path)
+    course = store.add(course_url(3001), tmp_path / "old", name="Old (CO3001)")
+    original_bytes = path.read_bytes()
+    original = course.__dict__.copy()
+
+    def fail_replace(_source, _destination):
+        raise OSError("replace blocked")
+
+    monkeypatch.setattr("bklms_downloader.course_store.os.replace", fail_replace)
+    with pytest.raises(OSError, match="replace blocked"):
+        store.edit(course.id, name="New (CO3001)")
+
+    assert path.read_bytes() == original_bytes
+    assert store.get(course.id) is course
+    assert course.__dict__ == original
+    assert list(tmp_path.glob(".courses-*.tmp")) == []
+
+
 def test_clear_persists_an_empty_course_list(tmp_path: Path):
     path = tmp_path / "courses.json"
     store = CourseStore(path)

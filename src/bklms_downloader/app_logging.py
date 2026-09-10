@@ -19,12 +19,12 @@ def redact_sensitive_text(value: str) -> str:
     """Remove credentials and common session values before they reach disk."""
     text = str(value)
     text = re.sub(
-        r"(?i)\b(cookie|set-cookie|authorization)\s*[:=]\s*[^\r\n]+",
+        r"""(?i)\b(cookie|set-cookie|authorization)["']?\s*[:=]\s*[^\r\n]+""",
         r"\1: [REDACTED]",
         text,
     )
     return re.sub(
-        r"(?i)\b(moodlesession[a-z0-9_]*|sessionid|sesskey|access_token|token)\s*=\s*[^\s;&,]+",
+        r"""(?i)\b(moodlesession[a-z0-9_]*|sessionid|sesskey|access_token|token|password|passwd)["']?\s*[:=]\s*["']?[^\s;&,"']+""",
         r"\1=[REDACTED]",
         text,
     )
@@ -37,6 +37,12 @@ class SensitiveDataFilter(logging.Filter):
         return True
 
 
+class SensitiveFormatter(logging.Formatter):
+    def format(self, record):
+        # Logging appends exception/stack text AFTER filters run.
+        return redact_sensitive_text(super().format(record))
+
+
 def get_logger(name: str = "bklms_downloader") -> logging.Logger:
     logger = logging.getLogger(name)
     if logger.handlers:
@@ -47,7 +53,7 @@ def get_logger(name: str = "bklms_downloader") -> logging.Logger:
         path = default_log_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         handler = RotatingFileHandler(path, maxBytes=512 * 1024, backupCount=2, encoding="utf-8")
-        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+        handler.setFormatter(SensitiveFormatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
         handler.addFilter(SensitiveDataFilter())
         logger.addHandler(handler)
     except OSError:

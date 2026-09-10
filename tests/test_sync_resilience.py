@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import gzip
+import io
 from pathlib import Path
 from threading import Event
 
 import pytest
 import requests
+from urllib3.response import HTTPResponse
 
 from bklms_downloader.config import (
     MAX_REQUEST_ATTEMPTS,
@@ -13,6 +16,7 @@ from bklms_downloader.config import (
     RESOURCE_OPEN_DEADLINE,
 )
 from bklms_downloader.crawler import AuthenticationError, DeepDownloader, ResourceTimeout, SyncCancelled
+from bklms_downloader.course_store import CourseStore
 from bklms_downloader.gui import App
 from bklms_downloader.models import Course, CourseSyncResult, SyncBatchResult
 from bklms_downloader.sync_manager import SyncManager
@@ -192,6 +196,33 @@ def test_active_large_stream_is_allowed_to_make_progress(monkeypatch, tmp_path: 
     assert saved.read_bytes() == b"data"
 
 
+def test_urllib3_raw_stream_uses_read1_and_decodes_gzip():
+    payload = b"small incoming chunks should be observable"
+
+    class TrackingRaw(HTTPResponse):
+        def __init__(self):
+            super().__init__(
+                body=io.BytesIO(gzip.compress(payload)),
+                headers={"Content-Encoding": "gzip"},
+                preload_content=False,
+            )
+            self.calls: list[tuple[int | None, bool | None]] = []
+
+        def read1(self, amt=None, decode_content=None):
+            self.calls.append((amt, decode_content))
+            return super().read1(amt, decode_content)
+
+    raw = TrackingRaw()
+    response = requests.Response()
+    response.raw = raw
+
+    chunks = list(DeepDownloader._response_chunks(response, 7))
+
+    assert b"".join(chunks) == payload
+    assert raw.calls
+    assert all(size == 7 and decode for size, decode in raw.calls)
+
+
 def test_stream_total_deadline_cleans_partial_file(monkeypatch, tmp_path: Path):
     downloader = DeepDownloader(session=RecordingSession([]), output=tmp_path)
     response = make_response(
@@ -249,7 +280,8 @@ def test_cancelled_batch_stops_before_next_course_and_emits_completion(tmp_path:
     )
 
     assert batch.cancelled
-    assert [result.course_id for result in batch.results] == [first.id]
+    assert [result.course_id for result in batch.results] == [first.id, second.id]
+    assert batch.results[-1].status == "cancelled"
     assert BatchDownloader.calls == [first.url, second.url]
     assert events[-1]["event"] == "sync_all_complete"
 
@@ -268,6 +300,118 @@ def test_pre_cancelled_batch_does_not_start_a_new_course(tmp_path: Path):
     assert batch.cancelled
     assert not batch.results
     assert BatchDownloader.calls == []
+
+
+def test_active_course_cancellation_preserves_downloader_stats_and_is_not_synced(tmp_path: Path):
+    course = Course("1", "https://lms.hcmut.edu.vn/course/view.php?id=1", str(tmp_path / "one"))
+
+    class ActiveCancelledDownloader:
+        def __init__(self, *, output, **_kwargs):
+            self.output = Path(output)
+            self.root_course_name = "Partially downloaded course"
+            self.stats = {
+                "downloaded": 0,
+                "skipped": 0,
+                "skipped_video": 0,
+                "pages_saved": 0,
+                "errors": 0,
+            }
+
+        def crawl_course(self, _url, _output, depth=0):
+            assert depth == 0
+            self.stats.update(downloaded=3, skipped=4)
+            raise SyncCancelled("cancel during active transfer")
+
+    batch = SyncManager(downloader_factory=ActiveCancelledDownloader).sync_courses(
+        [course], requests.Session(), cancel_event=Event()
+    )
+
+    assert batch.cancelled
+    assert batch.downloaded == 3
+    assert batch.skipped == 4
+    assert batch.synced_courses == 0
+    assert batch.results[0].status == "cancelled"
+    assert batch.results[0].downloaded == 3
+    assert batch.results[0].skipped == 4
+
+
+def test_sync_persistence_failure_is_reported_without_losing_download_stats(
+    monkeypatch,
+    tmp_path: Path,
+):
+    course = Course("1", "https://lms.hcmut.edu.vn/course/view.php?id=1", str(tmp_path / "one"))
+    BatchDownloader.calls = []
+    BatchDownloader.outcomes = {course.url: {"downloaded": 2, "skipped": 1}}
+    store = CourseStore(tmp_path / "courses.json")
+    store.add(course.url, course.output_path)
+    monkeypatch.setattr(
+        store,
+        "update_sync",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("read-only")),
+    )
+    events: list[dict] = []
+
+    batch = SyncManager(store=store, downloader_factory=BatchDownloader).sync_courses(
+        [course], requests.Session(), events.append
+    )
+
+    result = batch.results[0]
+    assert result.status == "error"
+    assert result.error_message == "Không lưu được trạng thái đồng bộ."
+    assert result.downloaded == 2
+    assert result.skipped == 1
+    assert batch.errors == 1
+    assert [event["event"] for event in events] == [
+        "course_sync_start",
+        "crawler_event",
+        "course_sync_complete",
+        "sync_all_complete",
+    ]
+
+
+def test_persistence_failure_keeps_authentication_error_visible(
+    monkeypatch,
+    tmp_path: Path,
+):
+    course = Course("1", "https://lms.hcmut.edu.vn/course/view.php?id=1", str(tmp_path / "one"))
+    BatchDownloader.calls = []
+    BatchDownloader.outcomes = {
+        course.url: RuntimeError(
+            "Phiên đăng nhập BK-LMS chưa hợp lệ. Hãy đăng nhập lại."
+        )
+    }
+    store = CourseStore(tmp_path / "courses.json")
+    store.add(course.url, course.output_path)
+    monkeypatch.setattr(
+        store,
+        "update_sync",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("read-only")),
+    )
+
+    batch = SyncManager(store=store, downloader_factory=BatchDownloader).sync_courses(
+        [course], requests.Session()
+    )
+
+    assert batch.authentication_error
+    assert batch.results[0].error_message == "Không lưu được trạng thái đồng bộ."
+
+
+def test_ai_worker_error_restores_idle_without_using_sync_error_ui(monkeypatch):
+    app = bare_sync_app()
+    shown: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "bklms_downloader.gui.messagebox.showerror",
+        lambda title, message, **_kwargs: shown.append((title, message)),
+    )
+
+    App._handle_event(app, {"event": "ai_prepare_error"})
+
+    assert not app.syncing
+    assert app.cancel_sync_btn.state == "disabled"
+    assert app.summary == "Không thể chuẩn bị course cho AI."
+    assert shown and shown[0][0] == "Chuẩn bị cho AI"
+    assert "Lỗi đồng bộ" not in {title for title, _message in shown}
+    assert "Hãy thử lại" in shown[0][1]
 
 
 class FakeWidget:

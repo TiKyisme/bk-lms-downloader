@@ -31,8 +31,9 @@ No Python or Git setup is needed for the normal GUI experience.
    to stop safely; completed files stay in place.
 6. Run **Đồng bộ tất cả** again later; existing unchanged files are skipped.
 7. To study with ChatGPT: tick one or more synced courses, choose **Công cụ →
-   Chuẩn bị đã chọn cho AI**, then upload the generated **AI Study Pack.zip** to
-   ChatGPT and paste `CHATGPT_START_PROMPT.txt` from the pack.
+   Chuẩn bị đã chọn cho AI**, then upload the generated one-ZIP-per-course
+   **`<CourseName>_AI_Study_Pack.zip`** files. Each ZIP bootstraps its own tutor
+   from `00_START_HERE.md`; no large setup prompt is required.
 
 The app remembers both your course list and last output folder. You can remove
 checked courses or all courses from the app list; this never deletes downloaded
@@ -108,10 +109,12 @@ There is no Complete Archive mode, no `COURSE_*` output tree, no
 ## Optional AI preparation
 
 For downloaded courses, choose **Công cụ → Chuẩn bị đã chọn cho AI** or
-**Chuẩn bị tất cả cho AI**. Each course gets its own local `AI_Knowledge/` and
-an adjacent **AI Study Pack.zip** ready for ChatGPT upload. The pack starts with
-`START_HERE.md`, `COURSE_MAP.md`, `COVERAGE_REPORT.md`, and a copyable starter
-prompt; it also retains original lecture visual sources when diagrams matter.
+**Chuẩn bị tất cả cho AI**. Each course gets exactly one local
+**`<CourseName>_AI_Study_Pack.zip`** ready for ChatGPT upload. The pack starts
+with the numbered control files `00_START_HERE.md` through
+`05_RESUME_STATE.md`; it also retains original lecture visual sources when
+diagrams matter. Intermediate extraction and `AI_Knowledge` output are not
+left beside the course.
 Desktop releases include this local preparation feature; it does not add AI
 chat, cloud accounts, API keys, video transcription, or CUDA requirements.
 

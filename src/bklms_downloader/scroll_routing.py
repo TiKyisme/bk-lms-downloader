@@ -5,6 +5,18 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
+import customtkinter as ctk
+
+
+class RoutedScrollableFrame(ctk.CTkScrollableFrame):
+    """Our router owns wheel input; CTk must not accumulate global callbacks."""
+    def bind_all(self, sequence=None, func=None, add=None):
+        if sequence in {
+            "<MouseWheel>", "<KeyPress-Shift_L>", "<KeyPress-Shift_R>",
+            "<KeyRelease-Shift_L>", "<KeyRelease-Shift_R>",
+        }:
+            return None
+        return super().bind_all(sequence, func, add)
 
 
 @dataclass(frozen=True)
@@ -58,10 +70,22 @@ class WheelBindingRegistry:
     def install_once(self, toplevel: Any, callback: Any) -> bool:
         if self._installed:
             return False
-        # ``add=False`` intentionally replaces CustomTkinter's competing
-        # bind_all wheel callbacks.  The application router below explicitly
-        # dispatches every supported scroll region instead.
+        # A first bindtag consumes input before Text/Scrollbar widget and class
+        # handlers; an "all" handler alone is too late to prevent double scroll.
+        tag = f"ExclusiveWheel{id(self)}"
         for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
-            toplevel.bind_all(sequence, callback, add=False)
+            toplevel.bind_class(tag, sequence, callback)
+
+        def attach(widget):
+            tags = widget.bindtags()
+            if tag not in tags:
+                widget.bindtags((tag, *tags))
+            for child in widget.winfo_children():
+                attach(child)
+
+        attach(toplevel)
+        # Map events cover new rows and modal descendants without installing
+        # a callback per widget or retaining references to destroyed rows.
+        toplevel.bind_all("<Map>", lambda event: attach(event.widget), add="+")
         self._installed = True
         return True

@@ -1,44 +1,55 @@
 # AI Study Pack contract
 
-An AI Study Pack is a local, portable package generated from one downloaded
-course. It is designed for a student to upload to ChatGPT or another assistant
-without sharing application settings, cookies, logs, or absolute local paths.
+An AI Study Pack is a local, portable ZIP generated from exactly one downloaded
+course. It contains no application settings, cookies, logs, telemetry, cloud
+uploads, or absolute private paths. Preparation uses a private temporary
+workspace; only the finalized ZIP remains user-visible.
 
-## Required navigation
+## Required ZIP output
 
-- `START_HERE.md` explains reading order and evidence rules.
-- `COURSE_MAP.md` maps source order to chapters/modules and points to retained
-  original visual sources.
-- `COVERAGE_REPORT.md` accounts for every discovered source as READY, DUPLICATE,
-  LINK_ONLY, REFERENCE_INDEXED_ONLY, MEDIA_PENDING, SKIPPED, or ERROR.
-- `TUTOR_PROTOCOL.md` defines evidence-first teaching and problem-solving rules.
-- `CHATGPT_START_PROMPT.txt` is the short prompt a student can paste after upload.
+Each selected course produces exactly one independently named archive:
+
+```text
+<CourseName>_AI_Study_Pack.zip
+```
+
+The application never merges courses. If a course fails, other selected courses
+may complete and their ZIPs remain. Cancellation preserves completed archives
+and removes the active course's temporary workspace. Existing files are not
+overwritten; collisions use a deterministic numeric suffix.
+
+## Authoritative root files
+
+- `00_START_HERE.md` is the bootstrap instruction and tells the tutor to read
+  the five other numbered control files, inspect sources, validate/build the
+  roadmap, and start at the first unresolved micro-topic.
+- `01_COURSE_MAP.md` is generated from detected course sources, source order,
+  chapters, sections, gaps, and structural confidence.
+- `02_TUTOR_PROTOCOL.md` defines source-grounded interactive teaching:
+  Teach -> Assess -> Wait -> Debug -> Re-assess -> Advance, with a mastery gate.
+- `03_SOURCE_INDEX.md` maps stable source IDs to relative original names, types,
+  chapter information, locators, normalized documents, and retained visuals.
+- `04_COVERAGE_TRACKER.md` tracks roadmap/source coverage with not-started,
+  in-progress, mastered, weak, source-gap, and skipped states.
+- `05_RESUME_STATE.md` defines the compact current chapter, section,
+  micro-topic, completed/weak/skipped topics, recent assessments, and next topic.
 
 ## Teaching evidence
 
-- `chapters/` contains lossless, source-boundary-preserving consolidated Markdown
-  for course overview and every detected chapter/range.
-- `documents/` retains normalized individual sources; `chunks/` and
-  `meta/corpus.jsonl` retain retrieval-level traceability.
-- Every chunk has a source ID and locator. Course-specific claims should cite
-  `source_id + page/slide/locator`.
-- Original ready lecture PDFs/PPTX files are copied into `sources/` and mapped by
-  `meta/visual_manifest.json` so diagrams and layout-dependent meaning remain
-  accessible. Text extraction alone is not treated as complete visual coverage.
-
-## Coverage honesty
-
-- Chapter ranges such as `Ch3_4` are stored as `chapters: [3, 4]` and grouped as
-  `chapter_03_04`.
-- Numbering gaps are reported as possible missing downloaded materials; no
-  chapter content is invented.
-- URL shortcuts are marked LINK_ONLY unless their authorized target was actually
-  downloaded.
+- `chapters/` contains consolidated, source-boundary-preserving teaching evidence.
+- `documents/` contains normalized individual sources; `chunks/` and
+  `meta/corpus.jsonl` retain retrieval-level source IDs and locators.
+- Original ready lecture PDFs/PPTX files are copied into `sources/` when visual
+  layout or diagrams may matter.
+- Lecturer/course material has priority over included references, which have
+  priority over general model knowledge. Unsupported claims must be labelled
+  `[Outside supplied course material]`.
+- Missing, duplicate, link-only, media-pending, unsupported, or failed items are
+  recorded in the source index and coverage tracker; no content is invented.
 
 ## Validation
 
-`validate_ai_study_pack()` and `--validate-ai-pack <AI_Knowledge>` return a
-non-zero status for missing navigation, malformed manifests, missing source/chunk
-references, unretained visual lecture sources, absolute metadata paths, or empty
-chapter documents. Potential chapter gaps and genuinely unclassified lecture
-sources remain warnings.
+`validate_ai_study_pack()` and `--validate-ai-pack <unpacked-directory>` reject
+missing numbered navigation, malformed manifests, missing source/chunk
+references, unretained visual lecture sources, absolute metadata paths, empty
+chapter documents, legacy navigation files, and weak bootstrap/protocol rules.

@@ -66,10 +66,14 @@ class FakeResponse:
         self.url = url
         self.text = text
         self.status_code = status_code
+        self.closed = False
 
     def raise_for_status(self):
         if self.status_code >= 400:
             raise requests.HTTPError("bad response")
+
+    def close(self):
+        self.closed = True
 
 
 class FakeSession:
@@ -253,7 +257,8 @@ def test_empty_and_malformed_my_courses_are_safe():
 
 def test_discovery_requests_only_authenticated_my_courses_page():
     static_html = (FIXTURES / "dashboard_cards.html").read_text(encoding="utf-8")
-    session = FakeSession([FakeResponse(MY_COURSES_URL, static_html)])
+    response = FakeResponse(MY_COURSES_URL, static_html)
+    session = FakeSession([response])
 
     courses = discover_courses(session)
 
@@ -261,17 +266,21 @@ def test_discovery_requests_only_authenticated_my_courses_page():
     assert [url for url, _kwargs in session.calls] == [MY_COURSES_URL]
     assert all("/my/" not in url or url.endswith("/my/courses.php") for url, _kwargs in session.calls)
     assert all("/course/index.php" not in url for url, _kwargs in session.calls)
+    assert response.closed
 
 
 def test_discovery_returns_empty_after_successful_static_page_without_courses():
-    session = FakeSession([FakeResponse(MY_COURSES_URL, "<main>Loading...</main>")])
+    response = FakeResponse(MY_COURSES_URL, "<main>Loading...</main>")
+    session = FakeSession([response])
 
     assert discover_courses(session) == []
+    assert response.closed
 
 
 def test_zero_static_courses_trigger_rendered_browser_fallback():
     rendered_html = (FIXTURES / "dashboard_alternate.html").read_text(encoding="utf-8")
-    session = FakeSession([FakeResponse(MY_COURSES_URL, "<main>Loading...</main>")])
+    response = FakeResponse(MY_COURSES_URL, "<main>Loading...</main>")
+    session = FakeSession([response])
     driver = FakeDriver(rendered_html)
 
     courses = discover_courses_with_browser_fallback(session, driver, browser_timeout=0)
@@ -280,6 +289,7 @@ def test_zero_static_courses_trigger_rendered_browser_fallback():
     assert driver.get_calls == [MY_COURSES_URL]
     assert driver.closed == ["temporary"]
     assert driver.current_window_handle == "original"
+    assert response.closed
 
 
 def test_rendered_my_courses_html_parses_and_restores_original_tab():
@@ -399,10 +409,12 @@ def test_browser_state_is_restored_when_rendered_discovery_raises():
 
 
 def test_discovery_detects_expired_session_redirect():
-    session = FakeSession([FakeResponse("https://lms.hcmut.edu.vn/login/index.php")])
+    response = FakeResponse("https://lms.hcmut.edu.vn/login/index.php")
+    session = FakeSession([response])
 
     with pytest.raises(SessionExpiredError, match="đăng nhập"):
         discover_courses(session)
+    assert response.closed
 
 
 def test_discovery_failure_is_human_friendly():

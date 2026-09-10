@@ -1,10 +1,11 @@
 import logging
+import io
 from pathlib import Path
 
 import pytest
 import requests
 
-from bklms_downloader.app_logging import SensitiveDataFilter, redact_sensitive_text
+from bklms_downloader.app_logging import SensitiveDataFilter, SensitiveFormatter, redact_sensitive_text
 from bklms_downloader.app_settings import AppSettings
 from bklms_downloader.course_store import CourseStore
 from bklms_downloader.crawler import DeepDownloader
@@ -73,6 +74,47 @@ def test_fetch_retries_server_error_but_not_client_error(monkeypatch, tmp_path: 
     assert client_session.calls == 1
 
 
+def test_fetch_follows_six_redirects_within_one_opening_deadline(tmp_path: Path):
+    closed: list[str] = []
+    outcomes = []
+    current = "https://lms.hcmut.edu.vn/file"
+    for index in range(6):
+        next_url = f"https://lms.hcmut.edu.vn/file-{index + 1}"
+        redirect = response(current, b"", status=302)
+        redirect.headers["Location"] = next_url
+        redirect.close = lambda url=current: closed.append(url)  # type: ignore[method-assign]
+        outcomes.append(redirect)
+        current = next_url
+    final = response(current, b"payload")
+    outcomes.append(final)
+
+    result = DeepDownloader(
+        session=SequenceSession(outcomes),
+        output=tmp_path,
+    ).fetch("https://lms.hcmut.edu.vn/file")
+
+    assert result is final
+    assert closed == [f"https://lms.hcmut.edu.vn/file{'' if i == 0 else f'-{i}'}" for i in range(6)]
+
+
+def test_fetch_closes_and_rejects_redirect_without_location(tmp_path: Path):
+    redirect = response(
+        "https://lms.hcmut.edu.vn/file",
+        b"",
+        status=302,
+    )
+    closed = []
+    redirect.close = lambda: closed.append(True)  # type: ignore[method-assign]
+
+    with pytest.raises(requests.RequestException, match="Location"):
+        DeepDownloader(
+            session=SequenceSession([redirect]),
+            output=tmp_path,
+        ).fetch("https://lms.hcmut.edu.vn/file")
+
+    assert closed == [True]
+
+
 def test_same_filename_from_different_sources_is_kept_and_partial_failure_is_cleaned(tmp_path: Path):
     downloader = DeepDownloader(session=requests.Session(), output=tmp_path)
     first = response("https://lms.hcmut.edu.vn/pluginfile.php/1/a", b"one", filename="guide.pdf")
@@ -97,6 +139,36 @@ def test_same_filename_from_different_sources_is_kept_and_partial_failure_is_cle
     assert not (tmp_path / "broken.pdf.part").exists()
 
 
+def test_replacement_failure_keeps_existing_file_and_cleans_unique_partial(
+    monkeypatch,
+    tmp_path: Path,
+):
+    downloader = DeepDownloader(session=requests.Session(), output=tmp_path, force=True)
+    target = tmp_path / "lecture.pdf"
+    target.write_bytes(b"old complete file")
+    replacement = response(
+        "https://lms.hcmut.edu.vn/pluginfile.php/4/lecture",
+        b"new complete file",
+        filename="lecture.pdf",
+    )
+
+    def fail_replace(_source, _destination):
+        raise OSError("replacement blocked")
+
+    monkeypatch.setattr(Path, "replace", fail_replace)
+    with pytest.raises(OSError, match="replacement blocked"):
+        downloader.save_response_file(
+            replacement,
+            tmp_path,
+            "lecture",
+            replacement.url,
+            "test",
+        )
+
+    assert target.read_bytes() == b"old complete file"
+    assert list(tmp_path.glob(".download-*.part")) == []
+
+
 def test_corrupt_settings_and_courses_are_backed_up(tmp_path: Path):
     settings_path = tmp_path / "settings.json"
     settings_path.write_text("bad settings", encoding="utf-8")
@@ -119,3 +191,31 @@ def test_logging_redacts_cookies_and_session_values():
     record = logging.LogRecord("test", logging.INFO, "", 0, text, (), None)
     SensitiveDataFilter().filter(record)
     assert "secret" not in record.getMessage()
+
+
+def test_logging_redacts_chained_exception_traceback_and_dictionary_fields():
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(SensitiveFormatter("%(levelname)s: %(message)s"))
+    logger = logging.getLogger("test-sensitive-traceback")
+    logger.handlers.clear()
+    logger.propagate = False
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+
+    try:
+        try:
+            raise ValueError("password=inner-secret")
+        except ValueError as exc:
+            raise RuntimeError(
+                "request failed {'password': 'outer-secret', 'token': 'trace-token'}"
+            ) from exc
+    except RuntimeError:
+        logger.exception("download failed cookie=session-cookie")
+    finally:
+        logger.removeHandler(handler)
+
+    rendered = stream.getvalue()
+    assert "Traceback" in rendered
+    for secret in ("inner-secret", "outer-secret", "trace-token", "session-cookie"):
+        assert secret not in rendered

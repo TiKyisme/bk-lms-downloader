@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import queue
+import sys
 import threading
 import tkinter as tk
 import webbrowser
@@ -28,7 +29,7 @@ from .course_discovery import (
 from .course_store import CourseStore
 from .models import Course, SyncBatchResult, checked_courses
 from .platform_support import open_in_file_manager
-from .scroll_routing import WheelBindingRegistry, choose_scroll_route
+from .scroll_routing import WheelBindingRegistry, choose_scroll_route, RoutedScrollableFrame
 from .sync_manager import SyncManager
 from .ui_icons import icon
 from .ui_theme import THEME
@@ -296,7 +297,7 @@ class ImportCoursesDialog(ctk.CTkToplevel):
             text_color=THEME.muted_text,
         ).grid(row=0, column=0, sticky="sw", padx=18, pady=(0, 10))
 
-        scroll = ctk.CTkScrollableFrame(
+        scroll = RoutedScrollableFrame(
             card,
             fg_color=THEME.inset,
             corner_radius=10,
@@ -545,16 +546,9 @@ class AIBatchConfirmationDialog(ctk.CTkToplevel):
         remaining = len(courses) - len(preview)
         if remaining:
             preview.append(f"... và {remaining} course khác")
-        existing = sum((parent._course_root(course) / "AI_Knowledge").exists() for course in courses)
-        existing_notice = (
-            f"\n\n{existing}/{len(courses)} course đã có AI_Knowledge và sẽ được tạo lại."
-            if existing
-            else ""
-        )
         message = (
             "\n".join(preview)
-            + "\n\nKnowledge base của từng course sẽ được tạo/cập nhật riêng."
-            + existing_notice
+            + "\n\nMỗi course sẽ được xử lý riêng trong workspace tạm và tạo một ZIP AI Study Pack."
             + "\n\nQuá trình có thể mất vài phút."
         )
 
@@ -718,6 +712,8 @@ class App(ctk.CTk):
         self.syncing = False
         self.sync_cancel_event: threading.Event | None = None
         self.sync_started_at: float | None = None
+        self._close_requested = False
+        self._destroyed = False
         self.update_info: UpdateInfo | None = None
         self.current_course_id: str | None = None
         self.course_rows: dict[str, CourseRow] = {}
@@ -769,7 +765,7 @@ class App(ctk.CTk):
         }
 
     def _build_ui(self) -> None:
-        self.main_scroll = ctk.CTkScrollableFrame(self, fg_color=THEME.bg, corner_radius=0)
+        self.main_scroll = RoutedScrollableFrame(self, fg_color=THEME.bg, corner_radius=0)
         self.main_scroll.grid(row=0, column=0, sticky="nsew")
         self.main_scroll.grid_columnconfigure(0, weight=1)
 
@@ -812,23 +808,17 @@ class App(ctk.CTk):
 
     def _install_wheel_router(self) -> None:
         self._wheel_bindings.install_once(self, self._on_global_wheel)
-        # CTkTextbox forwards ``bind`` to its actual Tk Text widget.  Binding
-        # there once lets us consume the event before the Text class bindtag,
-        # rather than relying on bind_all ordering.
-        self._activity_text_widget = getattr(self.log_text, "_textbox", None)
-        for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
-            self.log_text.bind(sequence, self._on_activity_text_wheel)
 
     def _on_global_wheel(self, event):
         return self._route_wheel(event)
 
-    def _on_activity_text_wheel(self, event):
-        return self._route_wheel(event, forced_owner="activity", manual=True)
-
-    def _route_wheel(self, event, *, forced_owner: str | None = None, manual: bool = False):
+    def _route_wheel(self, event, *, forced_owner: str | None = None):
         widget = getattr(event, "widget", None)
         owner = forced_owner
         if owner is None:
+            grab = self.grab_current()
+            if grab is not None and widget.winfo_toplevel() != grab.winfo_toplevel():
+                return "break"
             regions = [
                 (name, self._scroll_region_roots(region))
                 for name, region in self._scroll_regions.items()
@@ -852,12 +842,6 @@ class App(ctk.CTk):
         if target is None:
             return "break"
 
-        # The direct Text binding below runs before the Tk Text class binding,
-        # so it scrolls manually.  If a future widget bypasses that binding,
-        # avoid double-scrolling the native Text class before the all bindtag.
-        if owner == "activity" and widget is self._activity_text_widget and not manual:
-            return "break"
-
         units = self._wheel_units(owner, event)
         if units:
             self._scroll_region(target, units)
@@ -878,7 +862,8 @@ class App(ctk.CTk):
         if delta == 0:
             return 0
 
-        total = self._wheel_remainders.get(owner, 0.0) - (delta / 6.0)
+        divisor = 1.0 if sys.platform == "darwin" else (40.0 if owner == "activity" else 6.0)
+        total = self._wheel_remainders.get(owner, 0.0) - (delta / divisor)
         # Tk precision touchpads may deliver deltas smaller than one canvas
         # unit.  A tiny direction-aware epsilon avoids six 1-point deltas
         # being stranded at -0.999999 due to binary floating point.
@@ -1003,7 +988,7 @@ class App(ctk.CTk):
         ctk.CTkFrame(table, fg_color=THEME.border, height=1, corner_radius=0).grid(
             row=1, column=0, columnspan=5, sticky="ew"
         )
-        self.course_scroll = ctk.CTkScrollableFrame(
+        self.course_scroll = RoutedScrollableFrame(
             table,
             fg_color=THEME.surface,
             corner_radius=0,
@@ -1327,6 +1312,8 @@ class App(ctk.CTk):
             return (f"{course.last_downloaded} file mới" if course.last_downloaded else "Hoàn tất"), THEME.success
         if course.last_status == "up_to_date":
             return "Giữ nguyên", THEME.primary
+        if course.last_status == "cancelled":
+            return "Đã hủy", THEME.muted_text
         return f"{max(1, course.last_errors)} lỗi", THEME.danger
 
     def _select_course(self, course_id: str) -> None:
@@ -1548,6 +1535,7 @@ class App(ctk.CTk):
         if not courses or self.syncing:
             return
 
+        self.sync_cancel_event = threading.Event()
         self._set_busy(True)
         self.progress.set(0)
         self.overall_var.set(f"0 / {len(courses)} course")
@@ -1556,12 +1544,17 @@ class App(ctk.CTk):
         self._log(f"[AI] Bắt đầu chuẩn bị {len(courses)} course.")
 
         def worker() -> None:
-            batch = AIBatchPreparer().prepare_courses(
-                courses,
-                self._course_root,
-                self._emit_from_worker,
-            )
-            self.events.put({"event": "ai_prepare_batch_complete", "result": batch})
+            try:
+                batch = AIBatchPreparer().prepare_courses(
+                    courses,
+                    self._course_root,
+                    self._emit_from_worker,
+                    cancel_event=self.sync_cancel_event,
+                )
+                self.events.put({"event": "ai_prepare_batch_complete", "result": batch})
+            except Exception:
+                LOG.exception("AI worker failed")
+                self.events.put({"event": "ai_prepare_error"})
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -1582,8 +1575,8 @@ class App(ctk.CTk):
         def worker() -> None:
             try:
                 wait_page(self.driver, extra=0.1)
-                session = make_session(self.driver)
-                courses = discover_courses_with_browser_fallback(session, self.driver)
+                with make_session(self.driver) as session:
+                    courses = discover_courses_with_browser_fallback(session, self.driver)
                 self.events.put({"event": "courses_discovered", "courses": courses})
             except (CourseDiscoveryError, SessionExpiredError) as exc:
                 self.events.put({"event": "course_discovery_error", "error": str(exc)})
@@ -1708,7 +1701,7 @@ class App(ctk.CTk):
         return url
 
     def _start_sync(self, selected_only: bool) -> None:
-        if self.login_opening:
+        if self.login_opening or self.syncing:
             return
         if self.driver is None:
             messagebox.showwarning(
@@ -1743,14 +1736,12 @@ class App(ctk.CTk):
         def worker() -> None:
             try:
                 wait_page(self.driver, extra=0.1)
-                session = make_session(self.driver)
-                manager = SyncManager(self.store)
-                manager.sync_courses(
-                    courses,
-                    session,
-                    self._emit_from_worker,
-                    cancel_event=self.sync_cancel_event,
-                )
+                with make_session(self.driver) as session:
+                    manager = SyncManager(self.store)
+                    manager.sync_courses(
+                        courses, session, self._emit_from_worker,
+                        cancel_event=self.sync_cancel_event,
+                    )
             except Exception as exc:
                 LOG.warning("Sync worker failed: %s", exc)
                 self.events.put({"event": "job_error"})
@@ -1791,27 +1782,55 @@ class App(ctk.CTk):
         self.sync_elapsed_var.set("")
 
     def _update_sync_elapsed(self) -> None:
+        if self.__dict__.get("_destroyed", False):
+            return
         if self.syncing and self.sync_started_at is not None:
             elapsed = max(0, int(monotonic() - self.sync_started_at))
             minutes, seconds = divmod(elapsed, 60)
             self.sync_elapsed_var.set(f"Đã chạy {minutes}:{seconds:02d}")
-        self.after(1000, self._update_sync_elapsed)
+        self._schedule_ui_callback(1000, self._update_sync_elapsed)
 
     def _emit_from_worker(self, event: dict) -> None:
         self.events.put(event)
 
     def _drain_events(self) -> None:
+        if self.__dict__.get("_destroyed", False):
+            return
         handled = 0
         try:
             while handled < MAX_UI_EVENTS_PER_TICK:
-                self._handle_event(self.events.get_nowait())
+                if self.__dict__.get("_destroyed", False):
+                    return
+                event = self.events.get_nowait()
+                try:
+                    self._handle_event(event)
+                except Exception:
+                    LOG.exception("UI event handler failed")
                 handled += 1
         except queue.Empty:
             pass
+        if self.__dict__.get("_destroyed", False):
+            return
         if handled == MAX_UI_EVENTS_PER_TICK and not self.events.empty():
-            self.after_idle(self._drain_events)
+            self._schedule_ui_callback(0, self._drain_events, idle=True)
         else:
-            self.after(120, self._drain_events)
+            self._schedule_ui_callback(120, self._drain_events)
+
+    def _schedule_ui_callback(self, delay: int, callback: Callable[[], None], *, idle: bool = False) -> bool:
+        """Schedule a Tk callback only while the root is still alive."""
+        if self.__dict__.get("_destroyed", False):
+            return False
+        try:
+            if idle:
+                self.after_idle(callback)
+            else:
+                self.after(delay, callback)
+        except (tk.TclError, RuntimeError):
+            # A queued worker/UI event can race with window destruction.  Do
+            # not let a stale callback turn a clean close into a traceback.
+            self._destroyed = True
+            return False
+        return True
 
     def _handle_event(self, event: dict) -> None:
         kind = event.get("event")
@@ -1834,9 +1853,14 @@ class App(ctk.CTk):
                 parent=self,
             )
         elif kind == "courses_discovered":
+            if self.__dict__.get("_close_requested", False):
+                self._set_busy(False)
+                return
             self._show_imported_courses(event["courses"])
         elif kind == "course_discovery_error":
             self._set_busy(False)
+            if self.__dict__.get("_close_requested", False):
+                return
             self.current_course_var.set("Sẵn sàng đồng bộ")
             message = event["error"]
             self._set_summary_message(message)
@@ -1863,6 +1887,18 @@ class App(ctk.CTk):
                 )
         elif kind == "ai_prepare_batch_complete":
             self._complete_ai_batch(event["result"])
+        elif kind == "ai_prepare_error":
+            self._finish_sync_activity()
+            self._set_busy(False)
+            if self.__dict__.get("_close_requested", False):
+                return
+            self.current_course_var.set("Sẵn sàng đồng bộ")
+            self._set_summary_message("Không thể chuẩn bị course cho AI.")
+            messagebox.showerror(
+                "Chuẩn bị cho AI",
+                "Không thể hoàn tất chuẩn bị AI. Hãy thử lại sau.",
+                parent=self,
+            )
         elif kind == "update_available":
             self.update_info = event["update"]
             self.update_notice_var.set(f"Có bản cập nhật v{self.update_info.latest_version}")
@@ -1885,7 +1921,9 @@ class App(ctk.CTk):
             result = event["result"]
             self.progress.set(min(1, event["index"] / max(1, event["total"])))
             self._refresh_course_row(result.course_id)
-            if result.status == "error":
+            if result.status == "cancelled":
+                self._log(f"[CANCEL] {result.name} — giữ {result.downloaded} file đã tải")
+            elif result.status == "error":
                 self._log(f"[ERROR] {result.name}: không thể đồng bộ.")
             else:
                 suffix = "Không có thay đổi" if result.status == "up_to_date" else f"{result.downloaded} mới"
@@ -1895,6 +1933,8 @@ class App(ctk.CTk):
         elif kind == "job_error":
             self._finish_sync_activity()
             self._set_busy(False)
+            if self.__dict__.get("_close_requested", False):
+                return
             self._set_login_status("Có lỗi", "error")
             self._set_summary_message("Không thể hoàn tất đồng bộ.")
             messagebox.showerror(
@@ -1904,6 +1944,7 @@ class App(ctk.CTk):
             )
 
     def _complete_ai_batch(self, batch: AIBatchPreparationResult) -> None:
+        self._finish_sync_activity()
         self._set_busy(False)
         total = len(batch.results)
         succeeded = batch.succeeded
@@ -1915,18 +1956,28 @@ class App(ctk.CTk):
             f"AI: {len(succeeded)} course thành công • {len(failed)} course thất bại"
         )
 
-        if not failed:
-            packs = [
-                next(result.output.parent.glob("* - AI Study Pack.zip"), None)
-                for result in succeeded
-                if result.output is not None
-            ]
-            pack_lines = [str(pack) for pack in packs if pack is not None]
-            next_step = (
-                "\n\nBước tiếp theo: mở thư mục course, upload file “AI Study Pack.zip” vào ChatGPT, "
-                "rồi dùng CHATGPT_START_PROMPT.txt trong gói."
+        if self.__dict__.get("_close_requested", False):
+            self.current_course_var.set("Đang đóng ứng dụng...")
+            return
+
+        if batch.cancelled:
+            packs = [str(result.output) for result in succeeded if result.output is not None]
+            retained = "\n".join(f"- {pack}" for pack in packs)
+            messagebox.showinfo(
+                "Đã hủy chuẩn bị cho AI",
+                "Đã hủy sau course đang xử lý. ZIP đã hoàn tất vẫn được giữ lại."
+                + (f"\n\n{retained}" if retained else ""),
+                parent=self,
             )
-            location = f"\n\nGói đầu tiên: {pack_lines[0]}" if pack_lines else ""
+            return
+
+        if not failed:
+            pack_lines = [str(result.output) for result in succeeded if result.output is not None]
+            next_step = (
+                "\n\nBước tiếp theo: upload từng file ZIP vào ChatGPT. "
+                "Mở 00_START_HERE.md nếu cần xem hướng dẫn bootstrap."
+            )
+            location = "\n\n" + "\n".join(f"- {pack}" for pack in pack_lines) if pack_lines else ""
             messagebox.showinfo(
                 "Chuẩn bị cho AI",
                 f"Đã chuẩn bị {len(succeeded)}/{total} course cho AI."
@@ -1949,6 +2000,10 @@ class App(ctk.CTk):
             + "\n".join(preview)
             + "\n\nXem Hoạt động gần đây hoặc app.log để biết chi tiết kỹ thuật."
         )
+        if succeeded:
+            message += "\n\nZIP đã tạo:\n" + "\n".join(
+                f"- {result.output}" for result in succeeded if result.output is not None
+            )
         messagebox.showwarning("Chuẩn bị cho AI", message, parent=self)
 
     def _handle_crawler_event(self, activity: dict) -> None:
@@ -1986,6 +2041,9 @@ class App(ctk.CTk):
         self.progress.set(1 if total and not batch.cancelled else min(1, len(batch.results) / max(1, total)))
         self.overall_var.set(f"{len(batch.results)} / {total} course")
         self._refresh_courses()
+        if self.__dict__.get("_close_requested", False):
+            self.current_course_var.set("Đang đóng ứng dụng...")
+            return
         if not batch.cancelled:
             self.current_course_var.set("Sẵn sàng đồng bộ")
 
@@ -2037,6 +2095,25 @@ class App(ctk.CTk):
         self.log_text.configure(state="disabled")
 
     def _on_close(self) -> None:
+        if self.__dict__.get("_destroyed", False):
+            return
+        if self.__dict__.get("_close_requested", False):
+            if self.syncing:
+                self._schedule_ui_callback(150, self._on_close)
+                return
+            self._finalize_close()
+            return
+        if self.syncing:
+            self._close_requested = True
+            if self.sync_cancel_event is not None:
+                self.sync_cancel_event.set()
+            self.current_course_var.set("Đang chờ tác vụ dừng an toàn để đóng...")
+            self._schedule_ui_callback(150, self._on_close)
+            return
+        self._close_requested = True
+        self._finalize_close()
+
+    def _finalize_close(self) -> None:
         if self.sync_cancel_event is not None:
             self.sync_cancel_event.set()
         self._login_startup.closing.set()
@@ -2047,6 +2124,12 @@ class App(ctk.CTk):
         # its driver, without holding up Tk's event loop.
         threading.Thread(target=self._login_startup.close, daemon=False).start()
         self.destroy()
+
+    def destroy(self) -> None:
+        if self.__dict__.get("_destroyed", False):
+            return
+        self._destroyed = True
+        super().destroy()
 
 
 def main() -> None:

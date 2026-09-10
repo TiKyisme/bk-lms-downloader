@@ -78,7 +78,7 @@ def safe_name(value: str, max_len: int = 130) -> str:
         *(f"COM{i}" for i in range(1, 10)),
         *(f"LPT{i}" for i in range(1, 10)),
     }
-    if value.upper() in reserved:
+    if value.split(".")[0].upper() in reserved:
         value = "_" + value
 
     return value[:max_len].rstrip(" .") or "untitled"
@@ -94,7 +94,12 @@ def normalize_url(url: str) -> str:
 
 def is_same_lms(url: str) -> bool:
     try:
-        return urlparse(url).netloc.lower().endswith(LMS_HOST)
+        parsed = urlparse(url)
+        return (
+            parsed.scheme.lower() in {"http", "https"}
+            and parsed.hostname == LMS_HOST
+            and parsed.username is None and parsed.password is None
+        )
     except Exception:
         return False
 
@@ -103,7 +108,7 @@ def is_course_url(url: str) -> bool:
     try:
         p = urlparse(url)
         return (
-            p.netloc.lower().endswith(LMS_HOST)
+            is_same_lms(url)
             and p.path.endswith("/course/view.php")
             and bool(parse_qs(p.query).get("id"))
         )

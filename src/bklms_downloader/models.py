@@ -129,7 +129,7 @@ class SyncBatchResult:
 
     @property
     def synced_courses(self) -> int:
-        return sum(result.status != "error" for result in self.results)
+        return sum(result.status in {"success", "up_to_date"} for result in self.results)
 
 
 def _non_negative_int(value: object) -> int:

@@ -16,6 +16,13 @@ def test_course_url():
     assert not is_course_url("https://example.com/course/view.php?id=1")
 
 
+def test_lms_urls_require_exact_host_safe_scheme_and_no_userinfo():
+    assert is_course_url("http://lms.hcmut.edu.vn/course/view.php?id=1")
+    assert not is_course_url("https://lms.hcmut.edu.vn.evil.example/course/view.php?id=1")
+    assert not is_course_url("https://lms.hcmut.edu.vn@evil.example/course/view.php?id=1")
+    assert not is_course_url("ftp://lms.hcmut.edu.vn/course/view.php?id=1")
+
+
 def test_extract_course_code_is_conservative():
     assert extract_course_code("Mạng máy tính (TN) (CO3094)_NGUYỄN") == "CO3094"
     assert extract_course_code("Mạng máy tính (CO3093)_Lớp") == "CO3093"
@@ -34,6 +41,11 @@ def test_safe_name_windows_chars_and_brackets():
     assert "/" not in value
     assert "?" not in value
     assert "[L02,L03]" in value
+
+
+def test_safe_name_protects_windows_reserved_basenames_with_extensions():
+    assert safe_name("CON.txt") == "_CON.txt"
+    assert safe_name("LPT1") == "_LPT1"
 
 
 def test_video_detection_is_internal_only():

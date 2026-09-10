@@ -1,6 +1,5 @@
 import json
 import sys
-import sys
 import zipfile
 from pathlib import Path
 
@@ -66,17 +65,20 @@ def test_full_ai_study_pack_contract_and_zip_round_trip(tmp_path: Path):
     )
 
     output = AICoursePreparer().prepare(course_root)
-    report = validate_ai_study_pack(output)
-
+    assert output == tmp_path / "Software Engineering (CO3001)_AI_Study_Pack.zip"
+    assert not (course_root / "AI_Knowledge").exists()
+    assert len(list(tmp_path.glob("*.zip"))) == 1
+    with zipfile.ZipFile(output) as archive:
+        names = set(archive.namelist())
+        assert set(NAVIGATION_FILES).issubset(names)
+        assert not any(name in names for name in ("START_HERE.md", "TUTOR_PROTOCOL.md", "COURSE_MAP.md"))
+        assert any(name.startswith("sources/") for name in names)
+        unpacked = tmp_path / "unpacked"
+        archive.extractall(unpacked)
+    report = validate_ai_study_pack(unpacked)
     assert report.errors == []
     assert any("Chapter 5" in warning for warning in report.warnings)
-    assert all((output / name).is_file() for name in NAVIGATION_FILES)
-    assert (output / "chapters" / "chapter_01.md").is_file()
-    assert (output / "chapters" / "chapter_02.md").is_file()
-    assert (output / "chapters" / "chapter_03_04.md").is_file()
-    assert (output / "chapters" / "chapter_06.md").is_file()
-
-    records = _records(output / "meta" / "documents.jsonl")
+    records = _records(unpacked / "meta" / "documents.jsonl")
     ready_lectures = [record for record in records if record["source_type"] == "lecture_pdf" and record["status"] == "ready"]
     assert {tuple(record["chapters"]) for record in ready_lectures} == {(1,), (2,), (3, 4), (6,)}
     assert all(record["group"].startswith("chapter_") for record in ready_lectures)
@@ -84,22 +86,9 @@ def test_full_ai_study_pack_contract_and_zip_round_trip(tmp_path: Path):
     assert sum(record["status"] == "duplicate" for record in records) == 1
     assert sum(record["status"] == "link_only" for record in records) == 1
     assert all(not Path(record["source_path"]).is_absolute() for record in records)
-
-    chunks = _records(output / "meta" / "corpus.jsonl")
+    chunks = _records(unpacked / "meta" / "corpus.jsonl")
     assert chunks and all(chunk["source_id"] and chunk["locator"] for chunk in chunks)
     assert any(chunk["chapters"] == [3, 4] for chunk in chunks)
-
-    packs = list(course_root.glob("* - AI Study Pack.zip"))
-    assert len(packs) == 1
-    with zipfile.ZipFile(packs[0]) as archive:
-        names = set(archive.namelist())
-        assert "START_HERE.md" in names
-        assert "COURSE_MAP.md" in names
-        assert "COVERAGE_REPORT.md" in names
-        assert "CHATGPT_START_PROMPT.txt" in names
-        assert any(name.startswith("sources/") for name in names)
-        unpacked = tmp_path / "unpacked"
-        archive.extractall(unpacked)
     assert validate_ai_study_pack(unpacked).errors == []
 
 
@@ -123,27 +112,4 @@ def test_validator_reports_missing_navigation_as_a_structural_error(tmp_path: Pa
     report = validate_ai_study_pack(tmp_path)
 
     assert not report.valid
-    assert any("Missing navigation file: START_HERE.md" in error for error in report.errors)
-
-
-def test_chapter_detection_handles_single_numbers_and_explicit_ranges():
-    cases = {
-        "01_Ch1 Introduction.pdf": ([1], ("chapter_01", 1)),
-        "Ch 2 Software Processes.pdf": ([2], ("chapter_02", 2)),
-        "Chapter 03 Requirements.pdf": ([3], ("chapter_03", 3)),
-        "03_Ch3_4 Requirements.pdf": ([3, 4], ("chapter_03_04", 3)),
-        "Chapter 3-4 Requirements.pdf": ([3, 4], ("chapter_03_04", 3)),
-        "Ch 3 & 4 Requirements.pdf": ([3, 4], ("chapter_03_04", 3)),
-    }
-
-    for filename, (chapters, group) in cases.items():
-        path = Path(filename)
-        assert chapter_numbers_from_path(path) == chapters
-        assert classify_group(path) == group
-
-
-def test_validator_reports_missing_navigation_as_a_structural_error(tmp_path: Path):
-    report = validate_ai_study_pack(tmp_path)
-
-    assert not report.valid
-    assert any("Missing navigation file: START_HERE.md" in error for error in report.errors)
+    assert any("Missing navigation file: 00_START_HERE.md" in error for error in report.errors)

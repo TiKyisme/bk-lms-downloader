@@ -12,17 +12,22 @@ Write-Host "== BK-LMS Downloader: Windows build ==" -ForegroundColor Cyan
 $Venv = Join-Path $RepoRoot ".venv-build"
 if (-not (Test-Path $Venv)) {
     py -3 -m venv $Venv
+    if ($LASTEXITCODE -ne 0) { throw "Virtual environment creation failed." }
 }
 
 $Python = Join-Path $Venv "Scripts\python.exe"
 & $Python -m pip install -U pip
+if ($LASTEXITCODE -ne 0) { throw "pip update failed." }
 & $Python -m pip install ".[dev]"
+if ($LASTEXITCODE -ne 0) { throw "Dependency installation failed." }
 
 if (-not $SkipTests) {
     & $Python -m pytest
+    if ($LASTEXITCODE -ne 0) { throw "Tests failed; refusing to build." }
 }
 
 & $Python tools/build_desktop.py
+if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed; refusing to test an old EXE." }
 
 $Exe = Join-Path $RepoRoot "dist\BK-LMS-Downloader.exe"
 if (-not (Test-Path $Exe)) {

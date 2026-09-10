@@ -78,6 +78,43 @@ def test_event_drain_uses_a_bounded_per_tick_budget():
     assert scheduled[0][0] == "idle"
 
 
+def test_event_drain_continues_after_one_handler_exception():
+    app = App.__new__(App)
+    app.events = queue.Queue()
+    app.events.put({"event": "bad"})
+    app.events.put({"event": "good"})
+    handled = []
+    scheduled = []
+
+    def handle(event):
+        if event["event"] == "bad":
+            raise ValueError("malformed event")
+        handled.append(event["event"])
+
+    app._handle_event = handle
+    app.after_idle = lambda callback: scheduled.append(("idle", callback))
+    app.after = lambda delay, callback: scheduled.append((delay, callback))
+
+    App._drain_events(app)
+
+    assert handled == ["good"]
+    assert app.events.empty()
+    assert scheduled == [(120, app._drain_events)]
+
+
+def test_event_drain_does_not_schedule_tk_after_root_destroyed():
+    app = App.__new__(App)
+    app._destroyed = True
+    app.events = queue.Queue()
+    app.events.put({"event": "stale"})
+    app.after = lambda *_args: pytest.fail("must not call after on destroyed root")
+    app.after_idle = app.after
+
+    App._drain_events(app)
+
+    assert app.events.qsize() == 1
+
+
 def test_download_heartbeat_updates_headline_without_flooding_live_log():
     app = App.__new__(App)
     app.current_course_var = FakeVar()
