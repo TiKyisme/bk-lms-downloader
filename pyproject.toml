@@ -44,7 +44,7 @@ Changelog = "https://github.com/TiKyisme/bk-lms-downloader/blob/main/CHANGELOG.m
 
 [project.optional-dependencies]
 dev = [
-  "pytest>=8,<9",
+  "pytest>=8,<10",
   "pyinstaller>=6.10,<7",
   "reportlab>=4,<5",
 ]
