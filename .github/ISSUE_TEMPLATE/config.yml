@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Usage and support
+    url: https://github.com/TiKyisme/bk-lms-downloader/blob/main/SUPPORT.md
+    about: Read support guidance before opening a general usage question.
+  - name: Security vulnerability
+    url: https://github.com/TiKyisme/bk-lms-downloader/blob/main/SECURITY.md
+    about: Report sensitive issues privately; do not publish credentials or course data.

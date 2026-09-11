@@ -1,7 +1,16 @@
 # BK-LMS Downloader
 
-A desktop utility for HCMUT students to download and keep BK-LMS course
-materials in sync.
+[![Tests](https://github.com/TiKyisme/bk-lms-downloader/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/TiKyisme/bk-lms-downloader/actions/workflows/test.yml)
+[![Latest release](https://img.shields.io/github/v/release/TiKyisme/bk-lms-downloader)](https://github.com/TiKyisme/bk-lms-downloader/releases/latest)
+[![License](https://img.shields.io/github/license/TiKyisme/bk-lms-downloader)](LICENSE)
+[![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-4c6ef5)](docs/MACOS_PACKAGING.md)
+
+Desktop downloader and sync utility for HCMUT BK-LMS course materials, with
+local AI Study Pack export for source-grounded tutoring.
+
+**For HCMUT students:** download a packaged app, sign in directly in Chrome,
+sync course materials, and optionally export one local AI Study Pack ZIP per
+course. No Python setup is required for the packaged GUI.
 
 ## Downloads
 
@@ -11,6 +20,9 @@ Download the matching asset from the
 - **Windows:** `BK-LMS-Downloader-Windows.exe`
 - **Apple Silicon Mac (M1/M2/M3/M4):** `BK-LMS-Downloader-macOS-arm64.dmg`
 - **Intel Mac:** `BK-LMS-Downloader-macOS-x64.dmg`
+
+A verified public Microsoft Store listing URL is not yet documented here; use
+GitHub Releases for direct downloads and updates in the meantime.
 
 On a Mac, open **Apple menu → About This Mac**: it shows either an Apple chip
 or an Intel processor. macOS assets are unsigned until Developer ID signing and
@@ -41,7 +53,10 @@ files or folders on your computer.
 
 ## Screenshot
 
-![BK-LMS Downloader main window](docs/images/v1.0.0-main-window.png)
+![Representative BK-LMS Downloader window](docs/images/v1.0.0-main-window.png)
+
+The screenshot is representative of the desktop workflow; a refreshed capture
+will be added when a current manually verified image is available.
 
 ## Features
 
@@ -123,6 +138,11 @@ the standalone source-tool workflow.
 
 Microsoft Store packaging uses a four-component version whose last component
 must remain `0`; see [Microsoft Store versioning](docs/MICROSOFT_STORE.md).
+
+## Documentation
+
+See the [documentation index](docs/README.md) for architecture, release,
+security, packaging, Store-versioning, Chrome, and AI Study Pack guidance.
 
 ## CLI (advanced)
 

@@ -1,39 +1,91 @@
 name: Bug report
-description: Report a BK-LMS course/module that does not download correctly
+description: Report a reproducible problem without sharing private LMS data
 title: "[Bug] "
 labels: [bug]
 body:
   - type: markdown
     attributes:
       value: |
-        Do not include passwords, cookies, session data, or private course files.
+        **Privacy warning:** Never upload passwords, cookies, session tokens,
+        Authorization headers, private course files, full LMS exports, or
+        personally identifying information.
   - type: input
     id: version
     attributes:
-      label: Version
-      placeholder: v0.1.1
+      label: App version
+      placeholder: "1.1.4"
     validations:
       required: true
   - type: dropdown
-    id: run_mode
+    id: platform
     attributes:
-      label: How did you run it?
+      label: OS/platform
       options:
-        - Windows EXE / GUI
-        - Python GUI
+        - Windows 10
+        - Windows 11
+        - macOS arm64
+        - macOS x64
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: install_method
+    attributes:
+      label: Installation or run method
+      options:
+        - Microsoft Store
+        - GitHub Windows EXE
+        - macOS arm64 DMG
+        - macOS x64 DMG
+        - Source / Python
         - CLI
     validations:
       required: true
-  - type: textarea
-    id: what_happened
+  - type: dropdown
+    id: module_type
     attributes:
-      label: What happened?
-      description: Describe the Moodle activity type and what was missing/wrong.
+      label: BK-LMS or Moodle module type, if relevant
+      options:
+        - Not applicable
+        - File/resource
+        - Folder
+        - Page
+        - URL
+        - Assignment
+        - Quiz
+        - Other / unknown
     validations:
       required: true
   - type: textarea
-    id: logs
+    id: steps
     attributes:
-      label: Relevant log/error text
-      description: Remove personal/private information first.
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Redacted diagnostics or log excerpt
+      description: Remove private data before pasting. A short relevant excerpt is enough.
       render: shell
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: Optional screenshot
+      description: Redact course names, personal information, and LMS content first.

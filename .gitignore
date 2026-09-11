@@ -50,3 +50,6 @@ session.json
 courses.txt
 /courses.json
 /settings.json
+
+# Local Microsoft Store packaging workspace
+store-package/

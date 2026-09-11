@@ -1,35 +1,22 @@
-# GitHub release setup
+# GitHub repository setup
 
-The canonical repository is `TiKyisme/bk-lms-downloader`. Before creating a
-future release tag, update both source version declarations, the changelog, and
-the release checklist, then run:
+The canonical repository is `TiKyisme/bk-lms-downloader`.
 
-```powershell
-python tools/validate_versions.py --tag vX.Y.Z
-python -m pytest
-python -m compileall -q src tools app.py
-```
+## Release automation
 
-Only after the reviewed commit is on `main` and CI is green should a maintainer
-create and push an annotated tag:
+The release workflow validates the tagged source, builds Windows plus native
+macOS arm64/x64 assets, runs packaged checks, generates `SHA256SUMS.txt`, and
+creates one GitHub Release. Follow [docs/RELEASING.md](docs/RELEASING.md) for
+the canonical human release process and use `RELEASE_CHECKLIST.md` for the
+version-specific acceptance checklist.
 
-```powershell
-git tag -a vX.Y.Z -m "Release vX.Y.Z"
-git push origin vX.Y.Z
-```
+## Recommended repository settings
 
-The `release-windows.yml` workflow first validates source/tag consistency,
-compilation, and the full test suite. Native Windows, macOS arm64, and macOS
-x64 jobs then build explicit platform assets. One final job creates a single
-GitHub Release containing:
+- Set the repository description and topics listed in the README/release notes.
+- Protect `main` with required test checks, up-to-date branches, blocked force
+  pushes, and blocked deletion. A solo maintainer need not require a second
+  approval by default.
+- Enable GitHub Private Vulnerability Reporting when available.
+- Enable Dependabot version and security updates.
 
-- `BK-LMS-Downloader-Windows.exe`
-- `BK-LMS-Downloader-macOS-arm64.dmg`
-- `BK-LMS-Downloader-macOS-x64.dmg`
-
-Before public launch:
-
-1. Confirm the single release job contains all three named platform assets.
-2. Test the Windows EXE on a clean Windows machine.
-3. Test both macOS architectures on matching native Macs.
-4. Test at least several BK-LMS courses with different Moodle activity types.
+These remote settings are intentionally not changed by repository automation.
