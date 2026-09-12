@@ -14,15 +14,25 @@ course. No Python setup is required for the packaged GUI.
 
 ## Downloads
 
+### Windows — recommended
+
+[![Get it from Microsoft Store](https://img.shields.io/badge/Get_it_from-Microsoft_Store-0078D4?logo=microsoft&logoColor=white)](https://apps.microsoft.com/detail/9N1TTL7WPJT0)
+
+For Windows 10/11, the **Microsoft Store version is recommended**. It provides
+the smoothest installation and update experience through Microsoft Store.
+
+### Direct downloads
+
 Download the matching asset from the
 [latest GitHub Release](https://github.com/TiKyisme/bk-lms-downloader/releases/latest).
 
-- **Windows:** `BK-LMS-Downloader-Windows.exe`
+- **Windows portable EXE:** `BK-LMS-Downloader-Windows.exe`
 - **Apple Silicon Mac (M1/M2/M3/M4):** `BK-LMS-Downloader-macOS-arm64.dmg`
 - **Intel Mac:** `BK-LMS-Downloader-macOS-x64.dmg`
 
-A verified public Microsoft Store listing URL is not yet documented here; use
-GitHub Releases for direct downloads and updates in the meantime.
+> The Windows EXE downloaded directly from GitHub is currently unsigned and may
+> trigger a Microsoft Defender SmartScreen warning. The Microsoft Store version
+> is recommended for most Windows users.
 
 On a Mac, open **Apple menu → About This Mac**: it shows either an Apple chip
 or an Intel processor. macOS assets are unsigned until Developer ID signing and
