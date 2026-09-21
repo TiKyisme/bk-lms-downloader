@@ -20,6 +20,12 @@ The GUI owns interaction and lifecycle state. Chrome credentials are entered on
 BK-LMS, not into application fields. Browser cookies are used only for the
 active local session; they are not persisted with course settings.
 
+For a genuinely new local settings profile, the GUI can show a guided tutorial
+anchored to its actual controls. Valid profiles created before onboarding are
+migrated as already onboarded. The Help menu can replay the tutorial and opens
+an explicit feedback dialog; feedback is drafted locally and only opens a
+user-reviewed GitHub issue page when requested.
+
 `SyncManager` coordinates selected courses, progress, cancellation, and
 per-course results. The crawler writes downloads defensively so a failed
 replacement does not discard an existing completed file. Removing courses from
@@ -48,4 +54,5 @@ AI API, cloud upload, analytics, embeddings, or vector database.
   information must never be committed to this repository.
 
 For behavioral contracts, see the [AI Study Pack contract](AI_STUDY_PACK_CONTRACT.md)
-and the repository [security policy](../SECURITY.md).
+the [onboarding and feedback model](ONBOARDING_AND_FEEDBACK.md), and the
+repository [security policy](../SECURITY.md).

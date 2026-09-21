@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="BK-LMS Downloader giúp sinh viên HCMUT nhập môn, đồng bộ tài liệu BK-LMS và tạo AI Study Pack cục bộ.">
+    <meta property="og:title" content="BK-LMS Downloader">
+    <meta property="og:description" content="Tải và đồng bộ tài liệu BK-LMS dễ hơn.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://tikyisme.github.io/bk-lms-downloader/">
+    <meta property="og:image" content="https://tikyisme.github.io/bk-lms-downloader/assets/app-window.png">
+    <meta name="theme-color" content="#0b6ffb">
+    <title>BK-LMS Downloader — Đồng bộ tài liệu BK-LMS</title>
+    <link rel="icon" href="assets/brand.png" type="image/png">
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <a class="skip-link" href="#noi-dung">Bỏ qua điều hướng</a>
+    <header class="site-header">
+      <nav class="container nav" aria-label="Điều hướng chính">
+        <a class="brand" href="#dau-trang" aria-label="BK-LMS Downloader">
+          <img src="assets/brand.png" alt="">
+          <span>BK-LMS Downloader</span>
+        </a>
+        <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="nav-links">Menu</button>
+        <div class="nav-links" id="nav-links">
+          <a href="#cach-hoat-dong">Cách hoạt động</a>
+          <a href="#ai-study-pack">AI Study Pack</a>
+          <a href="#tai-ve">Tải về</a>
+          <a href="#cau-hoi">Hỏi đáp</a>
+        </div>
+      </nav>
+    </header>
+
+    <main id="noi-dung">
+      <section class="hero" id="dau-trang">
+        <div class="container hero-grid">
+          <div>
+            <p class="eyebrow">Dành cho sinh viên HCMUT</p>
+            <h1>Tải và đồng bộ tài liệu BK-LMS dễ hơn.</h1>
+            <p class="lead">Nhập môn học, lưu tài liệu theo thư mục gọn gàng và tạo AI Study Pack riêng cho từng môn — tất cả trên máy của bạn.</p>
+            <div class="hero-actions">
+              <a class="button button-primary" href="https://apps.microsoft.com/detail/9N1TTL7WPJT0">Tải cho Windows</a>
+              <a class="button button-secondary" href="https://github.com/TiKyisme/bk-lms-downloader">Xem mã nguồn</a>
+            </div>
+            <p class="quiet">Microsoft Store là kênh cài đặt Windows được khuyến nghị. Không cần cài Python cho bản ứng dụng đóng gói.</p>
+          </div>
+          <div class="hero-card" aria-label="Tóm tắt sản phẩm">
+            <div class="hero-card-mark">BK</div>
+            <div>
+              <strong>Đăng nhập trong Chrome</strong>
+              <span>Ứng dụng không hỏi hoặc lưu mật khẩu BK-LMS.</span>
+            </div>
+            <div>
+              <strong>Đồng bộ an toàn</strong>
+              <span>File không đổi được giữ lại; hủy vẫn giữ phần đã hoàn tất.</span>
+            </div>
+            <div>
+              <strong>AI Study Pack cục bộ</strong>
+              <span>Mỗi môn tạo một ZIP độc lập để bạn tự tải lên ChatGPT nếu muốn.</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section demo" aria-labelledby="demo-title">
+        <div class="container">
+          <div class="section-heading">
+            <p class="eyebrow">Xem nhanh</p>
+            <h2 id="demo-title">Quy trình sử dụng trong ứng dụng</h2>
+            <p>Bản ghi màn hình hướng dẫn sẽ phát tại đây khi tệp video được xuất bản.</p>
+          </div>
+          <div class="demo-frame">
+            <video id="demo-video" controls preload="metadata" poster="assets/app-window.png" aria-label="Video hướng dẫn BK-LMS Downloader">
+              <source src="assets/bk-lms-demo.mp4" type="video/mp4">
+              Trình duyệt của bạn không hỗ trợ video.
+            </video>
+            <div class="demo-fallback" id="demo-fallback">
+              <img src="assets/app-window.png" alt="Cửa sổ BK-LMS Downloader với danh sách môn học và tiến trình đồng bộ">
+              <p>Video hướng dẫn đang được chuẩn bị. Ảnh trên là giao diện ứng dụng thực tế.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section section-muted" id="cach-hoat-dong" aria-labelledby="flow-title">
+        <div class="container">
+          <div class="section-heading">
+            <p class="eyebrow">Cách hoạt động</p>
+            <h2 id="flow-title">Từ BK-LMS đến thư mục học tập của bạn</h2>
+          </div>
+          <ol class="flow-list">
+            <li><span>1</span><strong>Mở Chrome và đăng nhập BK-LMS</strong><small>Bạn đăng nhập trực tiếp trên trang BK-LMS chính thức.</small></li>
+            <li><span>2</span><strong>Nhập môn học</strong><small>Chọn môn đã đăng ký hoặc thêm URL môn học thủ công.</small></li>
+            <li><span>3</span><strong>Chọn môn và đồng bộ</strong><small>Checkbox quyết định các thao tác dành cho môn đã chọn.</small></li>
+            <li><span>4</span><strong>Lưu tài liệu theo thư mục</strong><small>Tài liệu được gom theo nhóm để dễ tìm lại.</small></li>
+            <li><span>5</span><strong>Tùy chọn chuẩn bị môn cho AI</strong><small>Mỗi môn có một AI Study Pack ZIP riêng, tạo hoàn toàn cục bộ.</small></li>
+          </ol>
+        </div>
+      </section>
+
+      <section class="section" aria-labelledby="features-title">
+        <div class="container">
+          <div class="section-heading">
+            <p class="eyebrow">Tính năng chính</p>
+            <h2 id="features-title">Tập trung vào việc học, không phải quản lý file</h2>
+          </div>
+          <div class="feature-grid">
+            <article><h3>Nhập môn nhanh</h3><p>Đọc danh sách môn đã đăng ký từ BK-LMS hoặc thêm môn bằng URL.</p></article>
+            <article><h3>Đồng bộ có chọn lọc</h3><p>Chọn từng môn bằng checkbox, đồng bộ từng phần hoặc toàn bộ danh sách.</p></article>
+            <article><h3>Thư mục gọn gàng</h3><p>Thông tin môn, bài giảng, lab, bài tập và tài liệu tham khảo được phân nhóm rõ ràng.</p></article>
+            <article><h3>Hủy an toàn</h3><p>Yêu cầu hủy không xóa các file đã hoàn tất và file không đổi được giữ lại ở lần sau.</p></article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section section-muted" id="ai-study-pack" aria-labelledby="ai-title">
+        <div class="container split">
+          <div>
+            <p class="eyebrow">AI Study Pack</p>
+            <h2 id="ai-title">Chuẩn bị từng môn để học cùng AI, theo cách cục bộ.</h2>
+            <p>Sau khi đồng bộ, bạn có thể tạo một ZIP AI Study Pack độc lập cho mỗi môn. ZIP chứa hướng dẫn học, bản đồ môn học và tài liệu đã được lập chỉ mục.</p>
+          </div>
+          <ul class="check-list">
+            <li>Tạo một ZIP riêng cho từng môn.</li>
+            <li>Không dùng API AI bên ngoài khi chuẩn bị.</li>
+            <li>Ứng dụng không tự tải bất kỳ file nào lên ChatGPT.</li>
+            <li>Bạn tự quyết định có tải ZIP lên ChatGPT hay không.</li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="section" aria-labelledby="privacy-title">
+        <div class="container privacy-card">
+          <div>
+            <p class="eyebrow">Riêng tư và cục bộ</p>
+            <h2 id="privacy-title">Tài liệu và thông tin đăng nhập vẫn ở phía bạn.</h2>
+          </div>
+          <ul class="check-list">
+            <li>Ứng dụng không yêu cầu tên đăng nhập hoặc mật khẩu BK-LMS.</li>
+            <li>Đăng nhập diễn ra trên trang BK-LMS trong Chrome.</li>
+            <li>Không có máy chủ đám mây của BK-LMS Downloader lưu tài liệu môn học.</li>
+            <li>Không có theo dõi, phân tích hành vi hoặc API AI trong quá trình chuẩn bị Study Pack.</li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="section section-muted" id="tai-ve" aria-labelledby="download-title">
+        <div class="container download-grid">
+          <div>
+            <p class="eyebrow">Tải về</p>
+            <h2 id="download-title">Chọn kênh cài đặt phù hợp</h2>
+            <p>Windows nên cài từ Microsoft Store. GitHub Releases cung cấp bản Windows và các bản macOS đóng gói.</p>
+          </div>
+          <div class="download-actions">
+            <a class="button button-primary" href="https://apps.microsoft.com/detail/9N1TTL7WPJT0">Microsoft Store cho Windows</a>
+            <a class="button button-secondary" href="https://github.com/TiKyisme/bk-lms-downloader/releases/latest">GitHub Releases và macOS</a>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="cau-hoi" aria-labelledby="faq-title">
+        <div class="container faq">
+          <div class="section-heading"><p class="eyebrow">Hỏi đáp</p><h2 id="faq-title">Một vài câu hỏi thường gặp</h2></div>
+          <details><summary>Ứng dụng có lưu mật khẩu BK-LMS không?</summary><p>Không. Bạn đăng nhập trực tiếp trong Chrome trên trang BK-LMS.</p></details>
+          <details><summary>Có cần cài Python không?</summary><p>Không cần cho bản ứng dụng đóng gói từ Microsoft Store hoặc GitHub Releases.</p></details>
+          <details><summary>AI Study Pack có tự gửi tài liệu cho AI không?</summary><p>Không. Ứng dụng chỉ tạo ZIP cục bộ; bạn tự chọn có tải ZIP đó lên ChatGPT hay không.</p></details>
+          <details><summary>Dự án có phải sản phẩm chính thức của HCMUT không?</summary><p>Không. Đây là dự án mã nguồn mở không chính thức, không liên kết với HCMUT hoặc BK-LMS.</p></details>
+        </div>
+      </section>
+
+      <section class="section open-source" aria-labelledby="source-title">
+        <div class="container">
+          <p class="eyebrow">Mã nguồn mở</p>
+          <h2 id="source-title">Xem mã nguồn, báo lỗi hoặc đóng góp trên GitHub.</h2>
+          <a class="button button-secondary" href="https://github.com/TiKyisme/bk-lms-downloader">Mở GitHub</a>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div class="container footer-grid">
+        <p>BK-LMS Downloader là dự án không chính thức, không liên kết với HCMUT hoặc BK-LMS.</p>
+        <a href="https://github.com/TiKyisme/bk-lms-downloader">GitHub</a>
+      </div>
+    </footer>
+    <script src="script.js"></script>
+  </body>
+</html>

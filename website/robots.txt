@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://tikyisme.github.io/bk-lms-downloader/sitemap.xml

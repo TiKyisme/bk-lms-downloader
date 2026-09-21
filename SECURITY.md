@@ -35,5 +35,6 @@ appropriate. No fixed response-time or remediation-time guarantee is made.
 BK-LMS Downloader does not collect BK-LMS passwords. Authentication occurs in
 the user-controlled Chrome session; cookies are used only in memory for the
 active sync. AI Study Pack preparation is local and does not call external AI
-services. These boundaries are documented further in
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+services. The feedback dialog opens a user-reviewed GitHub issue page only on
+explicit user action; it does not submit issues or send logs automatically.
+These boundaries are documented further in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).

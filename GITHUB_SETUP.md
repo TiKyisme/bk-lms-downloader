@@ -18,5 +18,7 @@ version-specific acceptance checklist.
   approval by default.
 - Enable GitHub Private Vulnerability Reporting when available.
 - Enable Dependabot version and security updates.
+- Enable GitHub Pages with **GitHub Actions** as its source after the Pages
+  workflow is merged.
 
 These remote settings are intentionally not changed by repository automation.

@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.0 - Unreleased
+
+- Add a Vietnamese static product website, first-run guided onboarding, and an
+  explicit user-reviewed GitHub feedback handoff.
+- Preserve local-only AI Study Pack preparation and add Help links for replaying
+  the tutorial, the product website, GitHub, and feedback.
+
 ## 1.1.4 - 2026-09-10
 
 - Preserve saved course/settings state when an atomic JSON write or replacement

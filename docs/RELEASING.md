@@ -29,6 +29,10 @@ version-specific manual acceptance checklist.
 7. Verify the release assets, checksums, and release notes. Submit the signed
    MSIX to Microsoft Store separately when applicable.
 
+For releases containing product-website, onboarding, or feedback changes, also
+verify the GitHub Pages deployment, a fresh-profile tutorial, legacy-profile
+migration, Help replay, and the user-reviewed feedback URL flow.
+
 Do not rewrite published tags or release history. Native macOS validation must
 run on matching macOS runners or hardware; Store submission and certification
 are external release activities.
