@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.2.0 - Unreleased
+## 1.2.0 - 2026-09-21
 
 - Add a Vietnamese static product website, first-run guided onboarding, and an
   explicit user-reviewed GitHub feedback handoff.
