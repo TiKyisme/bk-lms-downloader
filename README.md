@@ -12,17 +12,18 @@ local AI Study Pack export for source-grounded tutoring.
 sync course materials, and optionally export one local AI Study Pack ZIP per
 course. No Python setup is required for the packaged GUI.
 
+Trang giới thiệu: [tikyisme.github.io/bk-lms-downloader](https://tikyisme.github.io/bk-lms-downloader/)
+
 ## Downloads
 
-Download the matching asset from the
-[latest GitHub Release](https://github.com/TiKyisme/bk-lms-downloader/releases/latest).
+**Windows khuyến nghị:** cài từ [Microsoft Store](https://apps.microsoft.com/detail/9N1TTL7WPJT0).
+
+Bạn cũng có thể tải các gói đóng gói từ
+[GitHub Releases](https://github.com/TiKyisme/bk-lms-downloader/releases/latest).
 
 - **Windows:** `BK-LMS-Downloader-Windows.exe`
 - **Apple Silicon Mac (M1/M2/M3/M4):** `BK-LMS-Downloader-macOS-arm64.dmg`
 - **Intel Mac:** `BK-LMS-Downloader-macOS-x64.dmg`
-
-A verified public Microsoft Store listing URL is not yet documented here; use
-GitHub Releases for direct downloads and updates in the meantime.
 
 On a Mac, open **Apple menu → About This Mac**: it shows either an Apple chip
 or an Intel processor. macOS assets are unsigned until Developer ID signing and
@@ -73,6 +74,8 @@ will be added when a current manually verified image is available.
 - Existing files are kept when unchanged; Vietnamese filenames are repaired.
 - Video downloads are permanently disabled.
 - Passive GitHub Release update notice—updates only open after your click.
+- Hướng dẫn nhanh cho hồ sơ mới; có thể mở lại từ **Trợ giúp**.
+- Phản hồi trong ứng dụng mở trang GitHub đã điền sẵn để bạn tự xem và gửi.
 - Local **Công cụ → Chuẩn bị cho AI** preparation for checked courses or all
   courses—also included in the Windows release.
 
@@ -143,6 +146,11 @@ must remain `0`; see [Microsoft Store versioning](docs/MICROSOFT_STORE.md).
 
 See the [documentation index](docs/README.md) for architecture, release,
 security, packaging, Store-versioning, Chrome, and AI Study Pack guidance.
+
+## Trạng thái phát hành
+
+Bản công khai hiện tại là **v1.1.4**. Nhánh phát triển đang chuẩn bị **v1.2.0**;
+không có tag hoặc bản phát hành v1.2.0 nào được tạo từ mã nguồn này.
 
 ## CLI (advanced)
 

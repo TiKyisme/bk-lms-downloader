@@ -27,7 +27,9 @@ from .course_discovery import (
     discover_courses_with_browser_fallback,
 )
 from .course_store import CourseStore
+from .feedback import FeedbackDialog, current_platform_label
 from .models import Course, SyncBatchResult, checked_courses
+from .onboarding import OnboardingDialog
 from .platform_support import open_in_file_manager
 from .scroll_routing import WheelBindingRegistry, choose_scroll_route, RoutedScrollableFrame
 from .sync_manager import SyncManager
@@ -41,6 +43,8 @@ LOG = get_logger(__name__)
 MAX_UI_EVENTS_PER_TICK = 100
 LIVE_LOG_MAX_LINES = 500
 LIVE_LOG_TRIM_TO_LINES = 450
+PRODUCT_WEBSITE_URL = "https://tikyisme.github.io/bk-lms-downloader/"
+PROJECT_GITHUB_URL = "https://github.com/TiKyisme/bk-lms-downloader"
 
 
 def shorten_sync_activity(message: str, limit: int = 104) -> str:
@@ -724,6 +728,7 @@ class App(ctk.CTk):
         self._wheel_remainders: dict[str, float] = {}
         self._activity_text_widget = None
         self._live_log_line_count = 0
+        self._onboarding_dialog: OnboardingDialog | None = None
 
         self.login_status_var = tk.StringVar(value="Chưa đăng nhập")
         self.course_detail_var = tk.StringVar(
@@ -745,6 +750,7 @@ class App(ctk.CTk):
         self.after(120, self._drain_events)
         self.after(1000, self._update_sync_elapsed)
         self._check_for_updates()
+        self.after(350, self._maybe_start_onboarding)
 
     def _create_icons(self) -> dict[str, ctk.CTkImage]:
         return {
@@ -1020,8 +1026,10 @@ class App(ctk.CTk):
         self.open_btn = self._outline_button(action_left, "Mở thư mục", "folder", self._open_course_folder)
         for button in (self.add_btn, self.import_btn, self.edit_btn, self.delete_btn, self.open_btn):
             button.pack(side="left", padx=(0, 7))
+        self.help_btn = self._outline_button(controls, "Trợ giúp", "info", self._show_help_menu)
+        self.help_btn.grid(row=0, column=2, sticky="e", padx=(0, 7))
         self.tools_btn = self._outline_button(controls, "Công cụ", "tools", self._show_tools_menu)
-        self.tools_btn.grid(row=0, column=2, sticky="e")
+        self.tools_btn.grid(row=0, column=3, sticky="e")
 
         sync_actions = ctk.CTkFrame(self.courses_card, fg_color="transparent")
         sync_actions.grid(row=4, column=0, sticky="w", padx=14, pady=(0, 14))
@@ -1492,6 +1500,125 @@ class App(ctk.CTk):
             menu.tk_popup(self.tools_btn.winfo_rootx(), self.tools_btn.winfo_rooty() + self.tools_btn.winfo_height())
         finally:
             menu.grab_release()
+
+    def _show_help_menu(self) -> None:
+        menu = tk.Menu(self, tearoff=False, font=(THEME.font_family, 10))
+        menu.add_command(label="Xem lại hướng dẫn", command=self._replay_onboarding)
+        menu.add_command(label="Gửi phản hồi", command=self._show_feedback_dialog)
+        menu.add_separator()
+        menu.add_command(
+            label="Trang giới thiệu",
+            command=lambda: self._open_external_url(PRODUCT_WEBSITE_URL, "Trang giới thiệu"),
+        )
+        menu.add_command(
+            label="GitHub",
+            command=lambda: self._open_external_url(PROJECT_GITHUB_URL, "GitHub"),
+        )
+        try:
+            menu.tk_popup(self.help_btn.winfo_rootx(), self.help_btn.winfo_rooty() + self.help_btn.winfo_height())
+        finally:
+            menu.grab_release()
+
+    def _open_external_url(self, url: str, label: str, *, show_error: bool = True) -> bool:
+        try:
+            opened = bool(webbrowser.open_new_tab(url))
+        except Exception:
+            opened = False
+        if not opened and show_error:
+            messagebox.showwarning(
+                label,
+                "Không thể mở trình duyệt. Hãy sao chép liên kết và mở thủ công.",
+                parent=self,
+            )
+        return opened
+
+    def _show_feedback_dialog(self) -> None:
+        FeedbackDialog(
+            self,
+            app_version=__version__,
+            platform=current_platform_label(),
+            open_url=lambda url: self._open_external_url(url, "Gửi phản hồi", show_error=False),
+        )
+
+    def _onboarding_target(self, target_key: str | None) -> object | None:
+        targets = {
+            "login": self.login_btn,
+            "import": self.import_btn,
+            "courses": self.course_scroll,
+            "sync": self.sync_selected_btn,
+            "tools": self.tools_btn,
+        }
+        return targets.get(target_key)
+
+    def _reveal_onboarding_target(self, target_key: str | None) -> None:
+        target = self._onboarding_target(target_key)
+        if target is None:
+            return
+        try:
+            self.update_idletasks()
+            canvas = self.main_scroll._parent_canvas
+            viewport_top = canvas.winfo_rooty()
+            viewport_height = canvas.winfo_height()
+            target_top = target.winfo_rooty()
+            target_bottom = target_top + target.winfo_height()
+            if viewport_top + 12 <= target_top and target_bottom <= viewport_top + viewport_height - 12:
+                return
+            bounds = canvas.bbox("all")
+            if not bounds:
+                return
+            content_height = max(1, bounds[3] - bounds[1])
+            scrollable_height = max(1, content_height - viewport_height)
+            target_content_y = canvas.canvasy(0) + (target_top - viewport_top)
+            fraction = (target_content_y - 24) / scrollable_height
+            canvas.yview_moveto(max(0.0, min(1.0, fraction)))
+        except Exception:
+            pass
+
+    def _maybe_start_onboarding(self) -> None:
+        if self.__dict__.get("_destroyed", False) or self.syncing:
+            return
+        if self.settings.should_auto_show_onboarding():
+            self._show_onboarding()
+
+    def _replay_onboarding(self) -> None:
+        if self.syncing:
+            messagebox.showinfo(
+                "Hướng dẫn nhanh",
+                "Hãy chờ tác vụ hiện tại hoàn tất trước khi xem lại hướng dẫn.",
+                parent=self,
+            )
+            return
+        self._show_onboarding(manual_replay=True)
+
+    def _show_onboarding(self, *, manual_replay: bool = False) -> None:
+        if self._onboarding_dialog is not None:
+            try:
+                if self._onboarding_dialog.winfo_exists():
+                    self._onboarding_dialog.lift()
+                    return
+            except Exception:
+                pass
+
+        def done() -> None:
+            try:
+                self.settings.mark_onboarding_completed()
+            except OSError:
+                LOG.warning("Could not persist onboarding completion")
+                messagebox.showwarning(
+                    "Hướng dẫn nhanh",
+                    "Không thể lưu trạng thái hướng dẫn. Hướng dẫn có thể xuất hiện lại khi mở ứng dụng.",
+                    parent=self,
+                )
+            finally:
+                self._onboarding_dialog = None
+
+        self._onboarding_dialog = OnboardingDialog(
+            self,
+            target_for_step=self._onboarding_target,
+            reveal_target=self._reveal_onboarding_target,
+            on_done=done,
+            manual_replay=manual_replay,
+        )
 
     def _course_root(self, course: Course) -> Path:
         output = course.output_path
