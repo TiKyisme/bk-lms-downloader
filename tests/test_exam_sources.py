@@ -9,7 +9,10 @@ from bklms_downloader.exam_sources import (
     GoogleDriveProvider,
     classify_exam,
     is_exam_context,
+    infer_term,
 )
+from bklms_downloader.public_drive_browser import BrowserEnumeration, PublicDriveEntry
+from bklms_downloader.url_security import is_public_drive_url
 
 
 def response(*, text="", content=b"", status=200, headers=None):
@@ -30,6 +33,19 @@ def test_exam_classification_is_conservative():
     assert classify_exam("Đề cuối kỳ 2024.pdf") == "final"
     assert classify_exam("Bài tập.pdf", in_exam_context=False) is None
     assert classify_exam("Đề năm trước.pdf", in_exam_context=True) == "unknown_exam"
+    assert classify_exam("CK.pdf") == "final"
+    assert classify_exam("Đề CK 2024.pdf") == "final"
+    assert classify_exam("GK HK221.pdf") == "midterm"
+    assert classify_exam("GK.pdf") == "midterm"
+    assert classify_exam("Đề GK 2024.pdf") == "midterm"
+    assert classify_exam("CK HK221.pdf") == "final"
+    for name in ("Examples.pdf", "Example code.pdf", "Checklist.pdf", "Backpropagation.pdf", "Packet.pdf"):
+        assert classify_exam(name) is None
+    assert classify_exam("THI CK") == "final"
+    assert classify_exam("THI GK") == "midterm"
+    assert infer_term("Final_201_with_keys.pdf", in_exam_context=True) == "201"
+    assert infer_term("Midterm_221_with_keys.pdf", in_exam_context=True) == "221"
+    assert infer_term("On_tap_CK_202.pdf", in_exam_context=True) == "202"
 
 
 def test_public_folder_discovery_keeps_midterm_final_and_ignores_unrelated():
@@ -69,6 +85,21 @@ def test_download_cache_reuses_valid_payload_and_rejects_corruption(tmp_path: Pa
     assert cache.get("drive-id") is None
 
 
+def test_exam_cache_stale_or_changed_same_id_is_not_reused_forever(tmp_path: Path):
+    cache = ExamCache(tmp_path / "cache")
+    source = tmp_path / "exam.pdf"
+    source.write_bytes(b"first")
+    first = cache.put("same-id", source)
+    source.write_bytes(b"changed")
+    updated = cache.put("same-id", source)
+    assert updated.sha256 != first.sha256
+    assert Path(cache.get("same-id").path).read_bytes() == b"changed"
+    index = __import__("json").loads(cache.index_path.read_text(encoding="utf-8"))
+    index["same-id"]["cached_at"] = 0
+    cache.index_path.write_text(__import__("json").dumps(index), encoding="utf-8")
+    assert cache.get("same-id") is None
+
+
 def test_cancelled_download_cleans_partial_file(tmp_path: Path):
     class Session:
         def get(self, _url, **_kwargs):
@@ -82,3 +113,58 @@ def test_cancelled_download_cleans_partial_file(tmp_path: Path):
     assert output is None
     assert "hủy" in warning.lower()
     assert list(tmp_path.glob("*.part")) == []
+
+
+def test_deep_exam_context_propagates_type_term_and_official_variant(tmp_path: Path):
+    root = "https://drive.google.com/drive/folders/root"
+    mapping = {
+        root: [PublicDriveEntry("exam-root", "Đề thi", "https://drive.google.com/drive/folders/exam-root", True)],
+        "https://drive.google.com/drive/folders/exam-root": [PublicDriveEntry("ck", "THI CK", "https://drive.google.com/drive/folders/ck", True)],
+        "https://drive.google.com/drive/folders/ck": [PublicDriveEntry("term201", "201", "https://drive.google.com/drive/folders/term201", True)],
+        "https://drive.google.com/drive/folders/term201": [PublicDriveEntry("official", "CHÍNH THỨC", "https://drive.google.com/drive/folders/official", True)],
+        "https://drive.google.com/drive/folders/official": [PublicDriveEntry("paper", "paper.pdf", "https://drive.google.com/file/d/paper/view", False)],
+    }
+    class Browser:
+        def enumerate(self, url, **_kwargs): return BrowserEnumeration("public_enumerated", mapping.get(url, []))
+    class Session:
+        def get(self, _url, **_kwargs): return response(text="<html></html>")
+    discovered = GoogleDriveProvider(Session(), max_depth=8, metadata_cache=__import__("bklms_downloader.exam_sources", fromlist=["DriveMetadataCache"]).DriveMetadataCache(tmp_path), browser_enumerator=Browser()).discover([root])
+    assert [(item.exam_type, item.term, item.exam_variant) for item in discovered.candidates] == [("final", "201", "official")]
+
+
+def test_year_outside_exam_context_is_not_crawled_or_classified(tmp_path: Path):
+    root = "https://drive.google.com/drive/folders/root"
+    class Browser:
+        def enumerate(self, url, **_kwargs):
+            return BrowserEnumeration("public_enumerated", [PublicDriveEntry("year2024", "2024", "https://drive.google.com/drive/folders/year2024", True)] if url == root else [PublicDriveEntry("lecture", "lecture.pdf", "https://drive.google.com/file/d/lecture/view", False)])
+    class Session:
+        def get(self, _url, **_kwargs): return response(text="<html></html>")
+    discovered = GoogleDriveProvider(Session(), metadata_cache=__import__("bklms_downloader.exam_sources", fromlist=["DriveMetadataCache"]).DriveMetadataCache(tmp_path), browser_enumerator=Browser()).discover([root])
+    assert discovered.candidates == []
+    assert discovered.state_counts["skipped_non_exam_folder"] == 1
+
+
+def test_malicious_google_lookalikes_are_not_public_drive_sources():
+    for url in ("https://evilgoogle.com/file/d/x", "https://drive.google.com.attacker.example/file/d/x", "https://docs.google.com.evil.example/document/d/x"):
+        assert not is_public_drive_url(url)
+
+
+def test_high_priority_timeout_retries_once_and_does_not_block_sibling(tmp_path: Path):
+    root = "https://drive.google.com/drive/folders/root"
+    ck = "https://drive.google.com/drive/folders/ckbranch"
+    gk = "https://drive.google.com/drive/folders/gkbranch"
+    class Browser:
+        def __init__(self): self.calls = {}
+        def enumerate(self, url, **_kwargs):
+            self.calls[url] = self.calls.get(url, 0) + 1
+            if url == root: return BrowserEnumeration("public_enumerated", [PublicDriveEntry("ckbranch", "THI CK", ck, True), PublicDriveEntry("gkbranch", "THI GK", gk, True)])
+            if url == ck and self.calls[url] == 1: return BrowserEnumeration("timeout")
+            suffix = "ck" if url == ck else "gk"
+            return BrowserEnumeration("public_enumerated", [PublicDriveEntry("paper" + suffix, "paper.pdf", "https://drive.google.com/file/d/paper" + suffix + "/view", False)])
+    class Session:
+        def get(self, _url, **_kwargs): return response(text="<html></html>")
+    browser = Browser()
+    found = GoogleDriveProvider(Session(), metadata_cache=__import__("bklms_downloader.exam_sources", fromlist=["DriveMetadataCache"]).DriveMetadataCache(tmp_path), browser_enumerator=browser).discover([root])
+    assert browser.calls[ck] == 2
+    assert browser.calls[gk] == 1
+    assert {item.exam_type for item in found.candidates} == {"final", "midterm"}

@@ -18,6 +18,7 @@ from .app_logging import get_logger
 from .ai_study_pack import NAVIGATION_FILES, validate_ai_study_pack
 from .models import Course
 from .study_pack_refresh import CoursewaveEnricher, StudyPackRefresher, plan_refresh
+from .zip_safety import safe_extract_zip
 
 
 LOG = get_logger(__name__)
@@ -200,7 +201,7 @@ def _ai_runtime_self_test() -> Path:
                     raise RuntimeError("AI runtime self-test mixed course source data")
             with tempfile.TemporaryDirectory(prefix="bklms_ai_pack_roundtrip_") as unpacked:
                 with zipfile.ZipFile(pack) as archive:
-                    archive.extractall(unpacked)
+                    safe_extract_zip(archive, Path(unpacked))
                 unpacked_validation = validate_ai_study_pack(Path(unpacked))
             if unpacked_validation.errors:
                 raise RuntimeError(
@@ -431,7 +432,7 @@ class AICoursePreparer:
         cancel_event,
     ) -> Path:
         final_path = existing_pack or self._next_output_path(destination, candidate)
-        exams = enrichment.exams if enrichment is not None else ()
+        exams = enrichment.exams if enrichment is not None and enrichment.authoritative else None
         return StudyPackRefresher().finalize(
             candidate_pack=candidate,
             final_pack=final_path,

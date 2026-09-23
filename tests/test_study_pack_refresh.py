@@ -167,6 +167,20 @@ def test_failed_candidate_never_replaces_valid_pack(tmp_path: Path):
     assert valid.read_bytes() == original
 
 
+def test_unsafe_zip_member_is_rejected_without_replacing_valid_pack(tmp_path: Path):
+    root = tmp_path / "Course"
+    root.mkdir()
+    (root / "notes.txt").write_text("source", encoding="utf-8")
+    valid = AICoursePreparer().prepare(root)
+    original = valid.read_bytes()
+    unsafe = tmp_path / "unsafe.zip"
+    with zipfile.ZipFile(unsafe, "w") as archive:
+        archive.writestr("../evil.txt", "nope")
+    with pytest.raises(ValueError, match="escapes"):
+        StudyPackRefresher().finalize(candidate_pack=unsafe, final_pack=valid, source_root=root, course_code="CO2013", course_name="Course", plan=RefreshPlan("dirty"), exams=[])
+    assert valid.read_bytes() == original
+
+
 def test_v12_manifestless_pack_is_adopted_and_rebuilt_in_place(tmp_path: Path):
     source_root = tmp_path / "Course"
     source_root.mkdir()
@@ -229,6 +243,43 @@ def test_exam_assets_are_indexed_without_absolute_cache_paths(tmp_path: Path):
         assert exam_manifest["diagnostics"]["stage"] == "completed"
         assert exam_manifest["diagnostics"]["drive_source_count"] == 1
         assert pack_manifest["coursewave"]["stage"] == "completed"
+
+
+def test_local_only_refresh_preserves_existing_exam_assets(tmp_path: Path):
+    root = tmp_path / "Course"
+    root.mkdir()
+    (root / "notes.txt").write_text("source", encoding="utf-8")
+    candidate = AICoursePreparer().prepare(root)
+    exam = tmp_path / "old-final.pdf"
+    exam.write_bytes(b"old exam")
+    pack = tmp_path / "with-exam.zip"
+    refresher = StudyPackRefresher()
+    refresher.finalize(candidate_pack=candidate, final_pack=pack, source_root=root, course_code="CO2013", course_name="Course", plan=RefreshPlan("dirty"), exams=[ExamAsset("old", "Old Final.pdf", "final", "2022", "hash", str(exam), "https://drive.google.com/file/d/old")])
+    preserved = tmp_path / "preserved.zip"
+    refresher.finalize(candidate_pack=pack, final_pack=preserved, source_root=root, course_code="CO2013", course_name="Course", plan=RefreshPlan("dirty"), exams=None)
+    with zipfile.ZipFile(preserved) as archive:
+        assert "sources/past_exams/old__Old Final.pdf" in archive.namelist()
+        assert json.loads(archive.read("meta/exam_manifest.json"))["exams"][0]["stable_id"] == "old"
+
+
+def test_transient_coursewave_failure_preserves_known_good_exam_set(tmp_path: Path):
+    root = tmp_path / "Course"
+    root.mkdir()
+    (root / "notes.txt").write_text("changed local source", encoding="utf-8")
+    candidate = AICoursePreparer().prepare(root)
+    cached = tmp_path / "old.pdf"
+    cached.write_bytes(b"old")
+    refresher = StudyPackRefresher()
+    prior = tmp_path / "prior.zip"
+    refresher.finalize(candidate_pack=candidate, final_pack=prior, source_root=root, course_code="CO2013", course_name="Course", plan=RefreshPlan("dirty"), exams=[ExamAsset("old", "Old Final.pdf", "final", "2022", "hash", str(cached), "https://drive.google.com/file/d/old")])
+    refreshed = tmp_path / "refreshed.zip"
+    failure = EnrichmentResult(warnings=["Coursewave timeout"], stage="timeout", authoritative=False)
+    refresher.finalize(candidate_pack=prior, final_pack=refreshed, source_root=root, course_code="CO2013", course_name="Course", plan=RefreshPlan("dirty", changed_sources=("notes.txt",)), exams=None, enrichment=failure)
+    with zipfile.ZipFile(refreshed) as archive:
+        assert "sources/past_exams/old__Old Final.pdf" in archive.namelist()
+        assert json.loads(archive.read("meta/exam_manifest.json"))["exams"][0]["stable_id"] == "old"
+        assert "Old Final.pdf" in archive.read("06_EXAM_INDEX.md").decode("utf-8")
+        assert "Coursewave timeout" in archive.read("meta/pack_manifest.json").decode("utf-8")
 
 
 def test_coursewave_failure_is_optional_for_local_pack(tmp_path: Path):

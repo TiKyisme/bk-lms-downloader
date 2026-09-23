@@ -65,6 +65,7 @@ from bklms_downloader.ai_study_pack import (
     write_study_navigation,
 )
 from bklms_downloader.study_pack_refresh import RefreshPlan, StudyPackRefresher, snapshot_sources
+from bklms_downloader.zip_safety import safe_extract_zip
 
 
 # -----------------------------------------------------------------------------
@@ -362,7 +363,7 @@ def prepare_input(input_path: Path, work_dir: Path) -> tuple[Path, Optional[Path
         extracted.mkdir(parents=True, exist_ok=True)
         print(f"[1/6] Giải nén: {input_path.name}")
         with zipfile.ZipFile(input_path, "r") as zf:
-            zf.extractall(extracted)
+            safe_extract_zip(zf, extracted)
         return find_course_root(extracted), extracted
 
     raise ValueError("--input phải là thư mục hoặc file .zip")

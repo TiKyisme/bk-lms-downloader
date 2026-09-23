@@ -18,6 +18,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from .platform_support import user_config_dir
+from .url_security import is_google_redirect_url, is_public_drive_url
 
 
 COURSEWAVE_PUBLISHED_URL = (
@@ -53,7 +54,7 @@ def canonical_url(value: str) -> str:
     parsed = urlparse(value.strip())
     # Published Sheets wraps outgoing links through a public Google redirect.
     # Store the destination, otherwise the Drive provider cannot recognize it.
-    if parsed.netloc.endswith("google.com") and parsed.path == "/url":
+    if is_google_redirect_url(value) and parsed.path == "/url":
         target = parse_qs(parsed.query).get("q", [""])[0]
         if target:
             return canonical_url(target)
@@ -66,7 +67,7 @@ def _material_key(value: str) -> str:
     """Deduplicate public Drive sources even when Sheets uses a /u/N URL."""
     url = canonical_url(value)
     parsed = urlparse(url)
-    if parsed.netloc.endswith(("drive.google.com", "docs.google.com")):
+    if is_public_drive_url(url):
         match = re.search(r"/(?:file|document|spreadsheets|presentation)/d/([^/?#]+)", parsed.path)
         if match:
             return f"drive-file:{match.group(1)}"

@@ -18,6 +18,8 @@ from .ai_study_pack import _included_pack_paths, validate_ai_study_pack, write_s
 from .coursewave import CourseMatch, CoursewaveCandidate, CoursewaveClient, match_course
 from .exam_sources import CachedExam, DriveItem, ExamCache, ExamCandidate, GoogleDriveProvider, drive_id, sha256_file
 from .utils import safe_name
+from .url_security import is_public_drive_url
+from .zip_safety import safe_extract_zip
 
 
 PACK_SCHEMA_VERSION = 1
@@ -50,6 +52,7 @@ class ExamAsset:
     source_url: str
     source_role: str = "past_exam"
     extraction_status: str = "visual_unparsed"
+    exam_variant: str = "unknown"
 
 
 @dataclass(frozen=True)
@@ -75,6 +78,7 @@ class EnrichmentResult:
     drive_source_count: int = 0
     drive_candidate_count: int = 0
     drive_states: dict[str, int] = field(default_factory=dict)
+    authoritative: bool = False
 
 
 def _relative(path: Path, root: Path) -> str:
@@ -159,7 +163,7 @@ def _archive_workspace(workspace: Path, destination: Path) -> None:
 
 def _extract_pack(pack: Path, workspace: Path) -> None:
     with zipfile.ZipFile(pack) as archive:
-        archive.extractall(workspace)
+        safe_extract_zip(archive, workspace)
 
 
 class CoursewaveEnricher:
@@ -222,7 +226,7 @@ class CoursewaveEnricher:
                 return result
             drive_links = [
                 link for link in deduped_links.values()
-                if drive_id(link.url) and ("drive.google.com" in link.url or "docs.google.com" in link.url)
+                if drive_id(link.url) and is_public_drive_url(link.url)
             ]
             result.drive_source_count = len(drive_links)
             if not drive_links:
@@ -233,6 +237,10 @@ class CoursewaveEnricher:
             result.warnings.extend(discovery.warnings)
             result.drive_candidate_count = len(discovery.candidates)
             result.drive_states = dict(discovery.state_counts)
+            result.authoritative = not any(
+                discovery.state_counts.get(state)
+                for state in ("http_fetch_failed", "permission_denied", "browser_render_failed", "timeout", "cancelled")
+            )
             if not discovery.candidates:
                 result.warnings.append("Không phát hiện tệp đề giữa kỳ/cuối kỳ công khai từ các nguồn Drive đã khớp.")
                 if discovery.state_counts.get("permission_denied"):
@@ -255,16 +263,27 @@ class CoursewaveEnricher:
                     break
                 cached = self.cache.get(candidate.stable_id)
                 if cached is None:
+                    stale_cached = self.cache.get(candidate.stable_id, max_age_seconds=None)
+                    conditional_headers = {}
+                    if stale_cached and stale_cached.etag:
+                        conditional_headers["If-None-Match"] = stale_cached.etag
+                    if stale_cached and stale_cached.last_modified:
+                        conditional_headers["If-Modified-Since"] = stale_cached.last_modified
                     with tempfile.TemporaryDirectory(prefix="bklms_exam_download_") as temporary:
                         downloaded, etag, modified, warning = self.drive_provider.download(
-                            candidate, Path(temporary), cancel_event=cancel_event
+                            candidate, Path(temporary), cancel_event=cancel_event, conditional_headers=conditional_headers or None
                         )
-                        if downloaded is None:
+                        if downloaded is None and warning == "not_modified" and stale_cached is not None:
+                            self.cache.touch(candidate.stable_id)
+                            cached = self.cache.get(candidate.stable_id)
+                        if downloaded is None and cached is None:
                             if warning:
                                 result.warnings.append(warning)
                             result.drive_states["download_failed"] = result.drive_states.get("download_failed", 0) + 1
+                            result.authoritative = False
                             continue
-                        cached = self.cache.put(candidate.stable_id, downloaded, etag=etag, last_modified=modified)
+                        if downloaded is not None:
+                            cached = self.cache.put(candidate.stable_id, downloaded, etag=etag, last_modified=modified)
                 if cached.sha256 in seen_hashes:
                     continue
                 seen_hashes.add(cached.sha256)
@@ -278,6 +297,7 @@ class CoursewaveEnricher:
                         cache_path=cached.path,
                         source_url=candidate.url,
                         extraction_status=exam_extraction_status(Path(cached.path)),
+                        exam_variant=candidate.exam_variant,
                     )
                 )
             result.stage = "completed"
@@ -300,7 +320,7 @@ class StudyPackRefresher:
         course_code: str,
         course_name: str,
         plan: RefreshPlan,
-        exams: Iterable[ExamAsset] = (),
+        exams: Iterable[ExamAsset] | None = None,
         enrichment: EnrichmentResult | None = None,
         cancel_event: Event | None = None,
     ) -> Path:
@@ -309,16 +329,21 @@ class StudyPackRefresher:
             _extract_pack(candidate_pack, workspace)
             if cancel_event is not None and cancel_event.is_set():
                 raise RuntimeError("Đã hủy cập nhật AI Study Pack.")
-            exam_entries = list(exams)
-            self._write_exam_assets(workspace, exam_entries)
+            preserved_exam_manifest = _read_zip_json(candidate_pack, "meta/exam_manifest.json") if exams is None else None
+            preserve_existing_exams = exams is None and preserved_exam_manifest is not None
+            exam_entries = list(exams or ())
+            if not preserve_existing_exams:
+                self._write_exam_assets(workspace, exam_entries)
             snapshots = snapshot_sources(source_root)
             records = _read_jsonl(workspace / "meta" / "documents.jsonl")
             chunks = _read_jsonl(workspace / "meta" / "corpus.jsonl")
-            write_study_navigation(workspace, course_name, records, chunks, exams=[asdict(item) for item in exam_entries])
+            navigation_exams = [asdict(item) for item in exam_entries] if not preserve_existing_exams else list((preserved_exam_manifest or {}).get("exams", []))
+            write_study_navigation(workspace, course_name, records, chunks, exams=navigation_exams)
             _write_json(workspace / "meta" / "source_manifest.json", {"schema_version": 1, "sources": [asdict(item) for item in snapshots.values()]})
-            _write_json(
-                workspace / "meta" / "exam_manifest.json",
-                {
+            if not preserve_existing_exams:
+                _write_json(
+                    workspace / "meta" / "exam_manifest.json",
+                    {
                     "schema_version": 1,
                     "provider": "HCMUT Coursewave",
                     "diagnostics": {
@@ -329,12 +354,14 @@ class StudyPackRefresher:
                         "drive_candidate_count": enrichment.drive_candidate_count if enrichment else 0,
                         "states": enrichment.drive_states if enrichment else {},
                         "warnings": enrichment.warnings if enrichment else [],
+                        "authoritative": enrichment.authoritative if enrichment else False,
                     },
                     "exams": [
                         {
                             "stable_id": item.stable_id,
                             "original_name": item.original_name,
                             "exam_type": item.exam_type,
+                            "exam_variant": item.exam_variant,
                             "term": item.term,
                             "sha256": item.sha256,
                             "source_url": item.source_url,
@@ -344,8 +371,8 @@ class StudyPackRefresher:
                         }
                         for item in exam_entries
                     ],
-                },
-            )
+                    },
+                )
             _write_json(
                 workspace / "meta" / "pack_manifest.json",
                 {
@@ -375,6 +402,8 @@ class StudyPackRefresher:
 
     @staticmethod
     def _write_exam_assets(workspace: Path, exams: list[ExamAsset]) -> None:
+        shutil.rmtree(workspace / "sources" / "past_exams", ignore_errors=True)
+        shutil.rmtree(workspace / "documents" / "past_exams", ignore_errors=True)
         exam_dir = workspace / "sources" / "past_exams"
         lines = ["# Past Exam Index", "", "Historical exams are assessment-style evidence, not course truth.", ""]
         for exam in exams:
@@ -403,6 +432,7 @@ class StudyPackRefresher:
                     "",
                     f"- Source role: `past_exam`",
                     f"- Type: `{exam.exam_type}`",
+                    f"- Variant: `{exam.exam_variant}`",
                     f"- Term/year: `{exam.term or 'unknown'}`",
                     f"- SHA-256: `{exam.sha256}`",
                     f"- Extraction: `{exam.extraction_status}`",

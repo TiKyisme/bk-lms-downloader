@@ -16,6 +16,7 @@ from selenium import webdriver
 from selenium.common.exceptions import TimeoutException, WebDriverException
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.selenium_manager import SeleniumManager
+from .url_security import is_public_drive_url
 
 
 BROWSER_TIMEOUT_SECONDS = 18.0
@@ -172,6 +173,8 @@ class PublicDriveBrowserEnumerator:
         self.driver_factory = driver_factory
 
     def enumerate(self, url: str, *, max_items: int, cancel_event: Event | None = None, progress_callback: Callable[[str], None] | None = None) -> BrowserEnumeration:
+        if not is_public_drive_url(url):
+            return BrowserEnumeration("invalid_source", warning="Liên kết Drive công khai không hợp lệ.")
         self._notify(progress_callback, "Đang kiểm tra thư mục Drive công khai bằng Chrome tạm...")
         result = self._enumerate_once(url, max_items=max_items, cancel_event=cancel_event, headless=True)
         # A rendering failure can be headless-specific. Retry visibly only in
