@@ -66,6 +66,7 @@ from bklms_downloader.ai_study_pack import (
 )
 from bklms_downloader.study_pack_refresh import RefreshPlan, StudyPackRefresher, snapshot_sources
 from bklms_downloader.zip_safety import safe_extract_zip
+from bklms_downloader.lite_retention import optimize_workspace
 
 
 # -----------------------------------------------------------------------------
@@ -156,6 +157,8 @@ class DocumentRecord:
     chapters: list[int] = field(default_factory=list)
     order: int = 0
     source_copy_path: Optional[str] = None
+    represented_by_source_id: Optional[str] = None
+    retention_decision: Optional[str] = None
 
 
 @dataclass
@@ -1278,6 +1281,11 @@ class CoursePreparer:
                     )
                 )
 
+        print("[3/6] Tối ưu biểu diễn trùng lặp an toàn...")
+        try:
+            optimize_workspace(self.output_root, self.records)
+        except Exception:
+            pass
         print("[3/6] Sinh manifests/chunks...")
         self.check_cancelled()
         self.write_manifests()

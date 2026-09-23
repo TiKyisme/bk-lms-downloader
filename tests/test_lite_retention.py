@@ -1,0 +1,39 @@
+import json
+from pathlib import Path
+from types import SimpleNamespace
+
+import bklms_downloader.lite_retention as lite
+
+
+def record(source_id, copy, doc):
+    return SimpleNamespace(source_id=source_id, source_copy_path=copy, output_path=doc, represented_by_source_id=None, retention_decision=None)
+
+
+def workspace(tmp_path):
+    (tmp_path/"sources").mkdir(); (tmp_path/"documents").mkdir(); (tmp_path/"meta").mkdir()
+    (tmp_path/"sources/a.pptx").write_bytes(b"A"*5000); (tmp_path/"sources/unrelated-name.pdf").write_bytes(b"B"*1000)
+    for name in ("a.md","b.md"): (tmp_path/"documents"/name).write_text("identical instructional content "*20,encoding="utf-8")
+    return [record("left","sources/a.pptx","documents/a.md"),record("right","sources/unrelated-name.pdf","documents/b.md")]
+
+
+def test_full_equivalence_omits_larger_binary_and_keeps_traceability(monkeypatch,tmp_path):
+    records=workspace(tmp_path)
+    monkeypatch.setattr(lite,"verify_pptx_pdf",lambda *_: lite.EquivalenceResult("FULL_EQUIVALENCE",10,10,10,1.0,2,"verified"))
+    decisions=lite.optimize_workspace(tmp_path,records)
+    assert len(decisions)==1 and not (tmp_path/"sources/a.pptx").exists()
+    assert records[0].represented_by_source_id=="right"
+    assert json.loads((tmp_path/"meta/lite_retention.json").read_text())["sources"][0]["represented_by"]=="right"
+
+
+def test_unverified_changed_or_exception_keeps_both(monkeypatch,tmp_path):
+    records=workspace(tmp_path)
+    monkeypatch.setattr(lite,"verify_pptx_pdf",lambda *_: lite.EquivalenceResult("NOT_EQUIVALENT",reason="changed"))
+    assert lite.optimize_workspace(tmp_path,records)==[]
+    assert (tmp_path/"sources/a.pptx").exists() and (tmp_path/"sources/unrelated-name.pdf").exists()
+
+
+def test_verifier_exception_keeps_both(monkeypatch,tmp_path):
+    records=workspace(tmp_path)
+    monkeypatch.setattr(lite,"verify_pptx_pdf",lambda *_: (_ for _ in ()).throw(RuntimeError("failed")))
+    lite.optimize_workspace(tmp_path,records)
+    assert (tmp_path/"sources/a.pptx").exists() and (tmp_path/"sources/unrelated-name.pdf").exists()

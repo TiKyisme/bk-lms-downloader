@@ -34,6 +34,7 @@ dependencies = [
   "markdownify>=0.13,<1",
   "pypdf>=5,<7",
   "python-pptx>=1.0,<2",
+  "PyMuPDF>=1.24,<2",
 ]
 
 [project.urls]
