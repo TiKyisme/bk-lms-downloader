@@ -452,6 +452,7 @@ def _included_pack_paths(root: Path) -> list[Path]:
         "pack_manifest.json",
         "source_manifest.json",
         "exam_manifest.json",
+        "lite_retention.json",
     ):
         path = root / "meta" / name
         if path.is_file():
@@ -600,7 +601,10 @@ def validate_ai_study_pack(root: Path) -> AIStudyPackValidation:
             report.errors.append(f"Ready source document missing: {source_path}")
         if record.get("source_type") in VISUAL_SOURCE_TYPES and record.get("status") == "ready":
             copy_path = record.get("source_copy_path")
-            if not copy_path or not (root / str(copy_path)).is_file():
+            represented = record.get("represented_by_source_id")
+            decision = record.get("retention_decision")
+            valid_equivalent = decision == "OMIT_VERIFIED_DUPLICATE" and represented in source_ids
+            if (not copy_path or not (root / str(copy_path)).is_file()) and not valid_equivalent:
                 report.errors.append(f"Visual source not retained: {source_path}")
         if record.get("source_type") in VISUAL_SOURCE_TYPES and not chapter_numbers(record):
             report.warnings.append(f"Lecture source has no chapter assignment: {source_path}")

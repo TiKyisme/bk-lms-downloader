@@ -43,6 +43,11 @@ overwritten; collisions use a deterministic numeric suffix.
   `meta/corpus.jsonl` retain retrieval-level source IDs and locators.
 - Original ready lecture PDFs/PPTX files are copied into `sources/` when visual
   layout or diagrams may matter.
+- Lite Phase 1 may omit a larger duplicate binary only after a local full-deck
+  PPTX/PDF comparison proves every slide/page visually equivalent. The omitted
+  source ID remains represented in `meta/lite_retention.json`; count mismatch,
+  conversion failure, partial equivalence, single-format sources, and all
+  Coursewave exams remain full fidelity.
 - Lecturer/course material has priority over included references, which have
   priority over general model knowledge. Unsupported claims must be labelled
   `[Outside supplied course material]`.

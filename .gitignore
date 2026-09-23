@@ -53,3 +53,11 @@ courses.txt
 
 # Local Microsoft Store packaging workspace
 store-package/
+
+# Local-only Study Pack visual review inputs/outputs
+.visual-retention-review/
+.visual-retention-review.zip
+.visual-retention-analysis/
+/mmt_ai_lite_test.zip
+/mmt_ai.zip
+/study-pack-size-audit.txt
