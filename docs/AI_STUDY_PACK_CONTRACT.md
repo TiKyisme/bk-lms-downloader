@@ -48,6 +48,11 @@ overwritten; collisions use a deterministic numeric suffix.
   source ID remains represented in `meta/lite_retention.json`; count mismatch,
   conversion failure, partial equivalence, single-format sources, and all
   Coursewave exams remain full fidelity.
+- Lite Phase 2A may replace a PPTX-only source with its locally exported PDF
+  only when original slide count equals PDF page count, every rendered
+  slide/page passes visual comparison, and the compressed saving is at least
+  10% and 1 MiB. Any unavailable PowerPoint runtime, mismatch, or weak saving
+  retains the original PPTX.
 - Lecturer/course material has priority over included references, which have
   priority over general model knowledge. Unsupported claims must be labelled
   `[Outside supplied course material]`.
