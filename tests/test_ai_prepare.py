@@ -101,13 +101,14 @@ def test_preparer_returns_one_zip_without_legacy_output(tmp_path: Path):
         dependency_importer=lambda _module: object(),
         pipeline_loader=lambda _path: pipeline,
     )
+    preparer._finalize_refresh = lambda **_kwargs: pack  # type: ignore[method-assign]
 
     output = preparer.prepare(course_root)
 
     assert output == pack
     assert calls[0].input == course_root.resolve()
-    assert calls[0].output == course_root.parent.resolve()
-    assert calls[0].archive_destination == course_root.parent.resolve()
+    assert calls[0].output != course_root.resolve()
+    assert calls[0].archive_destination == calls[0].output
     assert calls[0].course_name == course_root.name
     assert calls[0].force is True
     assert calls[0].transcribe is False

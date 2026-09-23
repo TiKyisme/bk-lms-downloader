@@ -30,6 +30,23 @@ def test_course_status_error_and_last_sync_formatting_are_human_friendly():
     assert App._format_last_sync("2026-08-26T13:20:00+07:00") == "26/08 13:20"
 
 
+def test_study_pack_freshness_is_visible_without_hiding_sync_errors():
+    dirty = Course("5", "https://lms.hcmut.edu.vn/course/view.php?id=5", "out", study_pack_status="dirty")
+    updated = Course("6", "https://lms.hcmut.edu.vn/course/view.php?id=6", "out", study_pack_status="up_to_date")
+    failed = Course(
+        "7",
+        "https://lms.hcmut.edu.vn/course/view.php?id=7",
+        "out",
+        study_pack_status="up_to_date",
+        last_status="error",
+        last_errors=1,
+    )
+
+    assert App._status_text(dirty) == ("AI cần cập nhật", THEME.primary)
+    assert App._status_text(updated) == ("AI đã cập nhật", THEME.success)
+    assert App._status_text(failed) == ("1 lỗi", THEME.danger)
+
+
 def test_checked_courses_is_shared_source_of_truth_for_batch_actions():
     checked = Course("1", "https://lms.hcmut.edu.vn/course/view.php?id=1", "out")
     unchecked = Course(

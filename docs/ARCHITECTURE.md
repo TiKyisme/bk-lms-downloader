@@ -45,6 +45,13 @@ The package contains source evidence and numbered tutor-control files; it does
 not retain a persistent `AI_Knowledge` workspace. Preparation uses no external
 AI API, cloud upload, analytics, embeddings, or vector database.
 
+Optional Coursewave enrichment runs only during an explicit Study Pack update.
+It reads public Coursewave/Google Drive metadata, caches verified public exam
+payloads locally, and records past Midterm/Final sources separately from
+lecturer material. A manifest-enabled refresh can reuse an unchanged compatible
+pack, while changed or legacy packs are rebuilt transactionally before atomic
+replacement. Coursewave failure never prevents a local-only pack.
+
 ## Trust and privacy boundaries
 
 - Authentication remains between the user and BK-LMS in Chrome.
@@ -53,6 +60,6 @@ AI API, cloud upload, analytics, embeddings, or vector database.
 - Downloaded HCMUT material, cookies, session files, credentials, and personal
   information must never be committed to this repository.
 
-For behavioral contracts, see the [AI Study Pack contract](AI_STUDY_PACK_CONTRACT.md)
-the [onboarding and feedback model](ONBOARDING_AND_FEEDBACK.md), and the
+For behavioral contracts, see the [AI Study Pack contract](AI_STUDY_PACK_CONTRACT.md),
+the [Coursewave and past-exam model](COURSEWAVE_EXAMS.md), the [onboarding and feedback model](ONBOARDING_AND_FEEDBACK.md), and the
 repository [security policy](../SECURITY.md).

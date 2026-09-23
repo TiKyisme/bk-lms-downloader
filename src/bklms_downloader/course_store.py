@@ -219,6 +219,8 @@ class CourseStore:
         course.last_downloaded = result.downloaded
         course.last_skipped = result.skipped
         course.last_errors = result.errors
+        if course.study_pack_path and (result.downloaded > 0 or result.pages_saved > 0):
+            course.study_pack_status = "dirty"
         if result.name and result.name != "Chưa nhận diện":
             course.name = result.name
             detected_code = extract_course_code(course.name)
@@ -226,6 +228,23 @@ class CourseStore:
                 course.code = detected_code
         if not course.code:
             course.code = extract_course_code(course.name) or ""
+        self.save()
+        return course
+
+    @persisted_change
+    def update_study_pack(
+        self,
+        course_id: str,
+        *,
+        path: Path | str,
+        status: str,
+        coursewave_enabled: bool | None = None,
+    ) -> Course:
+        course = self._require(course_id)
+        course.study_pack_path = str(Path(path).expanduser())
+        course.study_pack_status = status
+        if coursewave_enabled is not None:
+            course.coursewave_enabled = coursewave_enabled
         self.save()
         return course
 

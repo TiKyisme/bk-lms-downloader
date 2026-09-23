@@ -170,6 +170,29 @@ def test_replace_failure_preserves_persisted_file_and_in_memory_row(tmp_path: Pa
     assert list(tmp_path.glob(".courses-*.tmp")) == []
 
 
+def test_study_pack_state_persists_and_sync_marks_existing_pack_dirty(tmp_path: Path):
+    store = CourseStore(tmp_path / "courses.json")
+    course = store.add(course_url(3001), tmp_path / "output", name="Course (CO3001)")
+    pack = tmp_path / "Course_AI_Study_Pack.zip"
+    store.update_study_pack(course.id, path=pack, status="up_to_date", coursewave_enabled=True)
+
+    result = CourseSyncResult(
+        course_id=course.id,
+        course_url=course.url,
+        name=course.name,
+        output=tmp_path / "output",
+        downloaded=1,
+        status="success",
+    )
+    store.update_sync(course.id, result)
+    restored = CourseStore(store.path).get(course.id)
+
+    assert restored is not None
+    assert restored.study_pack_path == str(pack)
+    assert restored.study_pack_status == "dirty"
+    assert restored.coursewave_enabled
+
+
 def test_clear_persists_an_empty_course_list(tmp_path: Path):
     path = tmp_path / "courses.json"
     store = CourseStore(path)

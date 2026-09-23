@@ -37,4 +37,6 @@ the user-controlled Chrome session; cookies are used only in memory for the
 active sync. AI Study Pack preparation is local and does not call external AI
 services. The feedback dialog opens a user-reviewed GitHub issue page only on
 explicit user action; it does not submit issues or send logs automatically.
+Optional Coursewave enrichment uses only public links and caches no Google
+credentials, browser tokens, or BK-LMS authentication data.
 These boundaries are documented further in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).

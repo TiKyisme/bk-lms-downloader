@@ -27,6 +27,7 @@ from .course_discovery import (
     discover_courses_with_browser_fallback,
 )
 from .course_store import CourseStore
+from .coursewave import CourseMatch, CoursewaveCandidate
 from .feedback import FeedbackDialog, current_platform_label
 from .models import Course, SyncBatchResult, checked_courses
 from .onboarding import OnboardingDialog
@@ -536,10 +537,11 @@ class DeleteConfirmationDialog(ctk.CTkToplevel):
 class AIBatchConfirmationDialog(ctk.CTkToplevel):
     """Confirm one sequential AI batch without prompting once per course."""
 
-    def __init__(self, parent: "App", courses: list[Course], on_confirm: Callable[[], None]):
+    def __init__(self, parent: "App", courses: list[Course], on_confirm: Callable[[bool], None]):
         super().__init__(parent)
         self.on_confirm = on_confirm
-        self.title(f"Chuẩn bị {len(courses)} course cho AI?")
+        self.coursewave_var = tk.BooleanVar(value=any(course.coursewave_enabled for course in courses))
+        self.title(f"Tạo / cập nhật {len(courses)} AI Study Pack?")
         self.geometry("610x390")
         self.minsize(510, 300)
         self.configure(fg_color=THEME.bg)
@@ -552,7 +554,7 @@ class AIBatchConfirmationDialog(ctk.CTkToplevel):
             preview.append(f"... và {remaining} course khác")
         message = (
             "\n".join(preview)
-            + "\n\nMỗi course sẽ được xử lý riêng trong workspace tạm và tạo một ZIP AI Study Pack."
+            + "\n\nMỗi course sẽ được xử lý riêng trong workspace tạm và tạo hoặc cập nhật một ZIP AI Study Pack."
             + "\n\nQuá trình có thể mất vài phút."
         )
 
@@ -581,8 +583,30 @@ class AIBatchConfirmationDialog(ctk.CTkToplevel):
             font=(THEME.font_family, 13),
             text_color=THEME.text,
         ).grid(row=1, column=0, sticky="nsew", padx=20, pady=(0, 14))
+        ctk.CTkCheckBox(
+            card,
+            text="Bổ sung đề thi công khai từ HCMUT Coursewave (Midterm/Final)",
+            variable=self.coursewave_var,
+            onvalue=True,
+            offvalue=False,
+            checkbox_width=20,
+            checkbox_height=20,
+            fg_color=THEME.primary,
+            hover_color=THEME.primary_hover,
+            border_color=THEME.border,
+            font=(THEME.font_family, 12),
+            text_color=THEME.text,
+        ).grid(row=2, column=0, sticky="w", padx=20, pady=(0, 12))
+        ctk.CTkLabel(
+            card,
+            text="Chỉ dùng liên kết công khai; Coursewave không làm gián đoạn AI Study Pack cục bộ.",
+            wraplength=540,
+            justify="left",
+            font=(THEME.font_family, 11),
+            text_color=THEME.muted_text,
+        ).grid(row=3, column=0, sticky="w", padx=20, pady=(0, 12))
         actions = ctk.CTkFrame(card, fg_color="transparent")
-        actions.grid(row=2, column=0, sticky="e", padx=20, pady=(0, 20))
+        actions.grid(row=4, column=0, sticky="e", padx=20, pady=(0, 20))
         ctk.CTkButton(
             actions,
             text="Hủy",
@@ -608,7 +632,74 @@ class AIBatchConfirmationDialog(ctk.CTkToplevel):
         ).pack(side="right", padx=(0, 8))
 
     def _confirm(self) -> None:
-        self.on_confirm()
+        self.on_confirm(bool(self.coursewave_var.get()))
+        self.destroy()
+
+
+class CoursewaveChoiceDialog(ctk.CTkToplevel):
+    """Let the user resolve a low-confidence Coursewave match on the Tk thread."""
+
+    def __init__(
+        self,
+        parent: "App",
+        course: Course,
+        match: CourseMatch,
+        on_choose: Callable[[CoursewaveCandidate | None], None],
+    ):
+        super().__init__(parent)
+        self.on_choose = on_choose
+        self.candidates = list(match.candidates)
+        self.choice_var = tk.IntVar(value=0)
+        self.title("Chọn môn Coursewave")
+        self.geometry("650x440")
+        self.minsize(560, 360)
+        self.configure(fg_color=THEME.bg)
+        self.transient(parent)
+        self.grab_set()
+        self.protocol("WM_DELETE_WINDOW", self._skip)
+
+        card = ctk.CTkFrame(self, fg_color=THEME.surface, border_color=THEME.border, border_width=1, corner_radius=THEME.radius)
+        card.pack(fill="both", expand=True, padx=18, pady=18)
+        card.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(card, text="Chọn môn Coursewave phù hợp", font=(THEME.font_family, 18, "bold"), text_color=THEME.text).grid(row=0, column=0, sticky="w", padx=18, pady=(18, 6))
+        ctk.CTkLabel(
+            card,
+            text=f"Không thể tự xác định an toàn Coursewave cho {course.display_name}. Hãy chọn đúng môn hoặc bỏ qua phần bổ sung đề thi.",
+            wraplength=570,
+            justify="left",
+            font=(THEME.font_family, 12),
+            text_color=THEME.muted_text,
+        ).grid(row=1, column=0, sticky="w", padx=18, pady=(0, 10))
+        choices = RoutedScrollableFrame(card, fg_color=THEME.inset, height=220, corner_radius=9)
+        choices.grid(row=2, column=0, sticky="nsew", padx=18, pady=(0, 14))
+        choices.grid_columnconfigure(0, weight=1)
+        for index, candidate in enumerate(self.candidates):
+            lecturers = ", ".join(candidate.lecturers) or "Không rõ giảng viên"
+            categories = ", ".join(candidate.categories) or "Không rõ danh mục"
+            text = f"{candidate.course_code or '-'} — {candidate.course_name or 'Không rõ tên'}\n{lecturers} • {categories} • {len(candidate.material_links)} nguồn tài liệu"
+            ctk.CTkRadioButton(
+                choices,
+                text=text,
+                variable=self.choice_var,
+                value=index,
+                anchor="w",
+                justify="left",
+                fg_color=THEME.primary,
+                hover_color=THEME.primary_hover,
+            ).grid(row=index, column=0, sticky="ew", padx=12, pady=7)
+        actions = ctk.CTkFrame(card, fg_color="transparent")
+        actions.grid(row=3, column=0, sticky="e", padx=18, pady=(0, 18))
+        ctk.CTkButton(actions, text="Bỏ qua Coursewave", command=self._skip, height=36, fg_color=THEME.surface, hover_color=THEME.inset, text_color=THEME.text, border_color=THEME.border, border_width=1, corner_radius=9).pack(side="right")
+        ctk.CTkButton(actions, text="Dùng môn này", command=self._confirm, height=36, fg_color=THEME.primary, hover_color=THEME.primary_hover, corner_radius=9).pack(side="right", padx=(0, 8))
+
+    def _confirm(self) -> None:
+        index = self.choice_var.get()
+        candidate = self.candidates[index] if 0 <= index < len(self.candidates) else None
+        self.on_choose(candidate)
+        self.destroy()
+
+    def _skip(self) -> None:
+        self.on_choose(None)
         self.destroy()
 
 
@@ -1314,14 +1405,20 @@ class App(ctk.CTk):
 
     @staticmethod
     def _status_text(course: Course) -> tuple[str, str]:
+        if course.last_status == "cancelled":
+            return "Đã hủy", THEME.muted_text
+        if course.last_status not in {"never", "success", "up_to_date"}:
+            return f"{max(1, course.last_errors)} lỗi", THEME.danger
+        if course.study_pack_status == "dirty":
+            return "AI cần cập nhật", THEME.primary
+        if course.study_pack_status == "up_to_date":
+            return "AI đã cập nhật", THEME.success
         if course.last_status == "never":
             return "Chưa đồng bộ", THEME.muted_text
         if course.last_status == "success":
             return (f"{course.last_downloaded} file mới" if course.last_downloaded else "Hoàn tất"), THEME.success
         if course.last_status == "up_to_date":
             return "Giữ nguyên", THEME.primary
-        if course.last_status == "cancelled":
-            return "Đã hủy", THEME.muted_text
         return f"{max(1, course.last_errors)} lỗi", THEME.danger
 
     def _select_course(self, course_id: str) -> None:
@@ -1349,9 +1446,15 @@ class App(ctk.CTk):
     def _show_course_detail(self, course_id: str) -> None:
         course = self.store.get(course_id)
         if course is not None:
+            pack_state = {
+                "missing": "AI: chưa tạo",
+                "dirty": "AI: cần cập nhật",
+                "up_to_date": "AI: đã cập nhật",
+                "legacy": "AI: cần cập nhật",
+            }.get(course.study_pack_status, "AI: chưa rõ trạng thái")
             self.course_detail_var.set(
                 f"{course.display_name} • Thư mục lưu: {course.output} • "
-                "Checkbox dùng cho Đồng bộ, Xóa và Chuẩn bị cho AI."
+                f"{pack_state} • Checkbox dùng cho Đồng bộ, Xóa và Chuẩn bị cho AI."
             )
 
     def _selected_course(self) -> Course | None:
@@ -1489,11 +1592,11 @@ class App(ctk.CTk):
     def _show_tools_menu(self) -> None:
         menu = tk.Menu(self, tearoff=False, font=(THEME.font_family, 10))
         menu.add_command(
-            label="Chuẩn bị đã chọn cho AI",
+            label="Tạo / cập nhật AI Study Pack đã chọn",
             command=self._prepare_checked_courses_for_ai,
         )
         menu.add_command(
-            label="Chuẩn bị tất cả cho AI",
+            label="Tạo / cập nhật AI Study Pack tất cả",
             command=self._prepare_all_courses_for_ai,
         )
         try:
@@ -1655,10 +1758,10 @@ class App(ctk.CTk):
         AIBatchConfirmationDialog(
             self,
             courses,
-            on_confirm=lambda: self._start_ai_preparation(courses),
+            on_confirm=lambda enrich_exams: self._start_ai_preparation(courses, enrich_exams=enrich_exams),
         )
 
-    def _start_ai_preparation(self, courses: list[Course]) -> None:
+    def _start_ai_preparation(self, courses: list[Course], *, enrich_exams: bool = False) -> None:
         if not courses or self.syncing:
             return
 
@@ -1677,6 +1780,8 @@ class App(ctk.CTk):
                     self._course_root,
                     self._emit_from_worker,
                     cancel_event=self.sync_cancel_event,
+                    enrich_exams=enrich_exams,
+                    coursewave_selector=self._request_coursewave_candidate,
                 )
                 self.events.put({"event": "ai_prepare_batch_complete", "result": batch})
             except Exception:
@@ -1920,6 +2025,22 @@ class App(ctk.CTk):
     def _emit_from_worker(self, event: dict) -> None:
         self.events.put(event)
 
+    def _request_coursewave_candidate(
+        self,
+        course: Course,
+        match: CourseMatch,
+        cancel_event: threading.Event | None = None,
+    ) -> CoursewaveCandidate | None:
+        response: queue.Queue[CoursewaveCandidate | None] = queue.Queue(maxsize=1)
+        self.events.put({"event": "coursewave_candidates", "course": course, "match": match, "response": response})
+        while True:
+            if cancel_event is not None and cancel_event.is_set():
+                return None
+            try:
+                return response.get(timeout=0.2)
+            except queue.Empty:
+                continue
+
     def _drain_events(self) -> None:
         if self.__dict__.get("_destroyed", False):
             return
@@ -2007,13 +2128,28 @@ class App(ctk.CTk):
             result = event["result"]
             self.progress.set(event["index"] / max(1, event["total"]))
             if result.succeeded:
-                self._log(f"[AI][DONE] {result.course.display_name}")
+                action = "cập nhật lại" if result.refresh_state in {"dirty", "legacy"} else "đã sẵn sàng"
+                self._log(f"[AI][DONE] {result.course.display_name} — {action}")
+                for warning in result.warnings:
+                    self._log(f"[COURSEWAVE][SKIP] {warning}")
             else:
                 self._log(
                     f"[AI][ERROR] {result.course.code or '-'}: {result.error or 'Unknown error'}"
                 )
+        elif kind == "coursewave_progress":
+            course: Course = event["course"]
+            message = event.get("message", "Đang kiểm tra Drive công khai...")
+            self.current_course_var.set(f"{course.code or '-'} — {message}")
+            self._log(f"[COURSEWAVE] {course.code or '-'} — {message}")
         elif kind == "ai_prepare_batch_complete":
             self._complete_ai_batch(event["result"])
+        elif kind == "coursewave_candidates":
+            CoursewaveChoiceDialog(
+                self,
+                event["course"],
+                event["match"],
+                event["response"].put,
+            )
         elif kind == "ai_prepare_error":
             self._finish_sync_activity()
             self._set_busy(False)
@@ -2087,6 +2223,20 @@ class App(ctk.CTk):
             self.current_course_var.set("Đang đóng ứng dụng...")
             return
 
+        for result in succeeded:
+            if result.output is None:
+                continue
+            try:
+                self.store.update_study_pack(
+                    result.course.id,
+                    path=result.output,
+                    status="up_to_date",
+                    coursewave_enabled=result.coursewave_enabled,
+                )
+                self._refresh_course_row(result.course.id)
+            except OSError:
+                LOG.warning("Could not persist Study Pack status for %s", result.course.id)
+
         if batch.cancelled:
             packs = [str(result.output) for result in succeeded if result.output is not None]
             retained = "\n".join(f"- {pack}" for pack in packs)
@@ -2103,6 +2253,7 @@ class App(ctk.CTk):
             next_step = (
                 "\n\nBước tiếp theo: upload từng file ZIP vào ChatGPT. "
                 "Mở 00_START_HERE.md nếu cần xem hướng dẫn bootstrap."
+                "\n\nNếu bạn đang dùng file này trong một cuộc trò chuyện ChatGPT cũ, hãy tải lại file ZIP mới để AI nhận tài liệu vừa cập nhật."
             )
             location = "\n\n" + "\n".join(f"- {pack}" for pack in pack_lines) if pack_lines else ""
             messagebox.showinfo(

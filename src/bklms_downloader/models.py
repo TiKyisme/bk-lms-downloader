@@ -35,6 +35,9 @@ class Course:
     last_downloaded: int = 0
     last_skipped: int = 0
     last_errors: int = 0
+    study_pack_path: str = ""
+    study_pack_status: str = "missing"
+    coursewave_enabled: bool = False
 
     @property
     def output_path(self) -> Path:
@@ -63,6 +66,9 @@ class Course:
             last_downloaded=_non_negative_int(value.get("last_downloaded")),
             last_skipped=_non_negative_int(value.get("last_skipped")),
             last_errors=_non_negative_int(value.get("last_errors")),
+            study_pack_path=str(value.get("study_pack_path", "")).strip(),
+            study_pack_status=str(value.get("study_pack_status", "missing")).strip() or "missing",
+            coursewave_enabled=bool(value.get("coursewave_enabled", False)),
         )
 
     def to_dict(self) -> dict:
@@ -78,6 +84,9 @@ class Course:
             "last_downloaded": self.last_downloaded,
             "last_skipped": self.last_skipped,
             "last_errors": self.last_errors,
+            "study_pack_path": self.study_pack_path,
+            "study_pack_status": self.study_pack_status,
+            "coursewave_enabled": self.coursewave_enabled,
         }
 
 
