@@ -6,6 +6,7 @@ from bklms_downloader.exam_sources import (
     DriveItem,
     ExamCandidate,
     ExamCache,
+    ExamDiscovery,
     GoogleDriveProvider,
     classify_exam,
     is_exam_context,
@@ -147,6 +148,12 @@ def test_year_outside_exam_context_is_not_crawled_or_classified(tmp_path: Path):
 def test_malicious_google_lookalikes_are_not_public_drive_sources():
     for url in ("https://evilgoogle.com/file/d/x", "https://drive.google.com.attacker.example/file/d/x", "https://docs.google.com.evil.example/document/d/x"):
         assert not is_public_drive_url(url)
+
+
+def test_discovery_completeness_rejects_partial_budget_states():
+    assert ExamDiscovery(state_counts={"public_enumerated": 2}).is_complete
+    for state in ("overall_timeout", "node_limit", "depth_limit", "timeout", "invalid_source"):
+        assert not ExamDiscovery(state_counts={state: 1, "public_enumerated": 1}).is_complete
 
 
 def test_high_priority_timeout_retries_once_and_does_not_block_sibling(tmp_path: Path):

@@ -282,6 +282,25 @@ def test_transient_coursewave_failure_preserves_known_good_exam_set(tmp_path: Pa
         assert "Coursewave timeout" in archive.read("meta/pack_manifest.json").decode("utf-8")
 
 
+def test_partial_coursewave_result_does_not_reconcile_old_exams(tmp_path: Path):
+    root = tmp_path / "Course"
+    root.mkdir()
+    (root / "notes.txt").write_text("source", encoding="utf-8")
+    candidate = AICoursePreparer().prepare(root)
+    old_file = tmp_path / "old.pdf"
+    old_file.write_bytes(b"old")
+    refresher = StudyPackRefresher()
+    prior = tmp_path / "prior.zip"
+    refresher.finalize(candidate_pack=candidate, final_pack=prior, source_root=root, course_code="CO2013", course_name="Course", plan=RefreshPlan("dirty"), exams=[ExamAsset("old", "Old Final.pdf", "final", "2022", "hash", str(old_file), "https://drive.google.com/file/d/old")])
+    partial = EnrichmentResult(warnings=["overall traversal timeout"], stage="overall_timeout", drive_states={"overall_timeout": 1}, authoritative=False)
+    output = tmp_path / "output.zip"
+    refresher.finalize(candidate_pack=prior, final_pack=output, source_root=root, course_code="CO2013", course_name="Course", plan=RefreshPlan("dirty"), exams=None, enrichment=partial)
+    with zipfile.ZipFile(output) as archive:
+        assert "sources/past_exams/old__Old Final.pdf" in archive.namelist()
+        assert json.loads(archive.read("meta/exam_manifest.json"))["exams"][0]["stable_id"] == "old"
+        assert "Old Final.pdf" in archive.read("06_EXAM_INDEX.md").decode("utf-8")
+
+
 def test_coursewave_failure_is_optional_for_local_pack(tmp_path: Path):
     root = tmp_path / "Course"
     root.mkdir()
@@ -321,3 +340,18 @@ def test_coursewave_catalog_failure_is_precise_and_nonfatal():
     assert result.match.status == "catalog_parse_failed"
     assert result.stage == "catalog_parse_failed"
     assert all("Không tìm thấy môn" not in warning for warning in result.warnings)
+
+
+def test_partial_discovery_with_candidates_is_not_authoritative():
+    from bklms_downloader.coursewave import CoursewaveCatalogResult, CoursewaveCourse, CoursewaveMaterial
+    from bklms_downloader.exam_sources import ExamCandidate, ExamDiscovery
+    class Catalog:
+        def fetch_catalog_result(self):
+            return CoursewaveCatalogResult("ok", (CoursewaveCourse("CO2013", "Database", "GV", "Tab", [CoursewaveMaterial("https://drive.google.com/file/d/source/view")]),))
+    class Drive:
+        def discover(self, *_args, **_kwargs):
+            return ExamDiscovery(candidates=[ExamCandidate("new", "https://drive.google.com/file/d/new/view", "Final.pdf", "final")], state_counts={"overall_timeout": 1})
+    result = CoursewaveEnricher(catalog_client=Catalog(), drive_provider=Drive()).enrich(course_code="CO2013", course_name="Database")
+    assert result.exams == [] or not result.authoritative
+    assert result.authoritative is False
+    assert result.stage == "overall_timeout"

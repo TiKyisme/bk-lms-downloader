@@ -36,6 +36,10 @@ EXAM_FOLDER_HINTS = (
 )
 GENERIC_PARENT_FOLDER_HINTS = ("tai lieu", "document", "archive", "semester", "year", "nam hoc", "hoc ky", "hk")
 MAX_TRAVERSAL_SECONDS = 75.0
+INCOMPLETE_DISCOVERY_STATES = frozenset({
+    "http_fetch_failed", "permission_denied", "browser_render_failed", "timeout",
+    "overall_timeout", "node_limit", "depth_limit", "cancelled", "invalid_source",
+})
 
 
 def folded(value: str) -> str:
@@ -177,6 +181,10 @@ class ExamDiscovery:
 
     def record_state(self, state: str) -> None:
         self.state_counts[state] = self.state_counts.get(state, 0) + 1
+
+    @property
+    def is_complete(self) -> bool:
+        return not any(self.state_counts.get(state) for state in INCOMPLETE_DISCOVERY_STATES)
 
 
 @dataclass

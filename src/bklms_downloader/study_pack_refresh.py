@@ -237,13 +237,20 @@ class CoursewaveEnricher:
             result.warnings.extend(discovery.warnings)
             result.drive_candidate_count = len(discovery.candidates)
             result.drive_states = dict(discovery.state_counts)
-            result.authoritative = not any(
-                discovery.state_counts.get(state)
-                for state in ("http_fetch_failed", "permission_denied", "browser_render_failed", "timeout", "cancelled")
-            )
+            result.authoritative = discovery.is_complete
+            if not result.authoritative:
+                result.stage = next((state for state in ("overall_timeout", "node_limit", "depth_limit", "timeout", "cancelled", "invalid_source", "http_fetch_failed", "permission_denied", "browser_render_failed") if discovery.state_counts.get(state)), "partial_discovery")
+                result.warnings.append("Khám phá đề thi chưa hoàn tất; giữ lại bộ đề đã biết trước đó.")
+                return result
             if not discovery.candidates:
                 result.warnings.append("Không phát hiện tệp đề giữa kỳ/cuối kỳ công khai từ các nguồn Drive đã khớp.")
-                if discovery.state_counts.get("permission_denied"):
+                if discovery.state_counts.get("overall_timeout"):
+                    result.stage = "overall_timeout"
+                elif discovery.state_counts.get("node_limit"):
+                    result.stage = "node_limit"
+                elif discovery.state_counts.get("depth_limit"):
+                    result.stage = "depth_limit"
+                elif discovery.state_counts.get("permission_denied"):
                     result.stage = "permission_denied"
                 elif discovery.state_counts.get("browser_render_failed"):
                     result.stage = "browser_render_failed"
