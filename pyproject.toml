@@ -47,7 +47,7 @@ Documentation = "https://tikyisme.github.io/bk-lms-downloader/"
 dev = [
   "pytest>=8,<9",
   "pyinstaller>=6.10,<7",
-  "reportlab>=4,<5",
+  "reportlab>=4,<6",
 ]
 [project.scripts]
 bklms = "bklms_downloader.cli:main"
