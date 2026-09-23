@@ -77,6 +77,19 @@ if ($ScrollTest.ExitCode -ne 0) {
     throw "Packaged GUI scroll/layout validation failed."
 }
 
+$LiteTest = Start-Process `
+    -FilePath $Exe `
+    -ArgumentList "--self-test-lite-runtime" `
+    -Wait `
+    -PassThru `
+    -WindowStyle Hidden
+if ($LiteTest.ExitCode -ne 0) {
+    if (Test-Path "lite-runtime-self-test.log") {
+        Get-Content "lite-runtime-self-test.log"
+    }
+    throw "Packaged Lite retention runtime validation failed."
+}
+
 Write-Host "" 
 Write-Host "Build OK:" -ForegroundColor Green
 Write-Host $Exe

@@ -37,3 +37,11 @@ def test_verifier_exception_keeps_both(monkeypatch,tmp_path):
     monkeypatch.setattr(lite,"verify_pptx_pdf",lambda *_: (_ for _ in ()).throw(RuntimeError("failed")))
     lite.optimize_workspace(tmp_path,records)
     assert (tmp_path/"sources/a.pptx").exists() and (tmp_path/"sources/unrelated-name.pdf").exists()
+
+
+def test_powerpoint_unavailable_is_conservative(monkeypatch, tmp_path):
+    monkeypatch.setattr(lite, "Presentation", lambda _path: SimpleNamespace(slides=[object()]))
+    monkeypatch.setattr(lite, "_pptx_to_pdf", lambda *_: (_ for _ in ()).throw(RuntimeError("PowerPoint unavailable")))
+    result = lite.verify_pptx_pdf(tmp_path / "deck.pptx", tmp_path / "deck.pdf")
+    assert result.verdict == "UNVERIFIED"
+    assert result.reason == "RuntimeError"
