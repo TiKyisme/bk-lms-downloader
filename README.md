@@ -154,8 +154,9 @@ security, packaging, Store-versioning, Chrome, and AI Study Pack guidance.
 
 ## Trạng thái phát hành
 
-Bản công khai hiện tại là **v1.2.0**. Nhánh phát triển đang chuẩn bị **v1.3.0**;
-không có tag hoặc bản phát hành v1.3.0 nào được tạo từ mã nguồn này.
+**v1.3.0** đã phát hành trên [GitHub Releases](https://github.com/TiKyisme/bk-lms-downloader/releases/latest).
+Bản cập nhật Microsoft Store v1.3.0 đã được gửi và đang chờ Microsoft chứng nhận;
+Store có thể vẫn hiển thị bản đã được duyệt trước đó trong thời gian này.
 
 ## CLI (advanced)
 

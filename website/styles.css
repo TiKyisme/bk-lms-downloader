@@ -67,6 +67,9 @@ video { width: 100%; display: block; background: #e9eff8; }
 .check-list li { padding-left: 28px; position: relative; }
 .check-list li::before { content: "✓"; position: absolute; left: 0; color: var(--primary); font-weight: 800; }
 .privacy-card { padding: 34px; border: 1px solid var(--border); border-radius: 18px; background: var(--surface); }
+.coursewave-card { margin-top: 34px; padding: 28px; border: 1px solid var(--border); border-radius: 18px; background: var(--surface); }
+.coursewave-card p { color: var(--muted); margin-bottom: 0; }
+.status-notice { margin: 20px 0 0; padding: 14px 16px; border-left: 4px solid var(--primary); border-radius: 8px; background: var(--surface); color: var(--muted); }
 .download-grid { align-items: start; }
 .faq { max-width: 820px; }
 details { padding: 16px 0; border-bottom: 1px solid var(--border); }

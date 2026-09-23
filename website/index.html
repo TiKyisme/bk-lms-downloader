@@ -38,12 +38,12 @@
           <div>
             <p class="eyebrow">Dành cho sinh viên HCMUT</p>
             <h1>Tải và đồng bộ tài liệu BK-LMS dễ hơn.</h1>
-            <p class="lead">Nhập môn học, lưu tài liệu theo thư mục gọn gàng và tạo AI Study Pack riêng cho từng môn — tất cả trên máy của bạn.</p>
+            <p class="lead">Nhập môn học, đồng bộ tài liệu vào thư mục gọn gàng và tùy chọn tạo AI Study Pack riêng cho từng môn — tất cả trên máy của bạn.</p>
             <div class="hero-actions">
               <a class="button button-primary" href="https://apps.microsoft.com/detail/9N1TTL7WPJT0">Tải cho Windows</a>
               <a class="button button-secondary" href="https://github.com/TiKyisme/bk-lms-downloader">Xem mã nguồn</a>
             </div>
-            <p class="quiet">Microsoft Store là kênh cài đặt Windows được khuyến nghị. Không cần cài Python cho bản ứng dụng đóng gói.</p>
+            <p class="quiet"><strong>v1.3.0</strong> · Microsoft Store là kênh cài đặt Windows được khuyến nghị. Không cần cài Python cho bản ứng dụng đóng gói.</p>
           </div>
           <div class="hero-card" aria-label="Tóm tắt sản phẩm">
             <div class="hero-card-mark">BK</div>
@@ -106,10 +106,13 @@
           </div>
           <div class="feature-grid">
             <article><h3>Nhập môn nhanh</h3><p>Đọc danh sách môn đã đăng ký từ BK-LMS hoặc thêm môn bằng URL.</p></article>
-            <article><h3>Đồng bộ có chọn lọc</h3><p>Chọn từng môn bằng checkbox, đồng bộ từng phần hoặc toàn bộ danh sách.</p></article>
+            <article><h3>Đồng bộ nhiều môn</h3><p>Chọn từng môn bằng checkbox, đồng bộ từng phần hoặc toàn bộ danh sách.</p></article>
+            <article><h3>Bỏ qua file không đổi</h3><p>Đồng bộ lại sau này mà không tải lại những file đã giữ nguyên.</p></article>
             <article><h3>Thư mục gọn gàng</h3><p>Thông tin môn, bài giảng, lab, bài tập và tài liệu tham khảo được phân nhóm rõ ràng.</p></article>
             <article><h3>Hủy an toàn</h3><p>Yêu cầu hủy không xóa các file đã hoàn tất và file không đổi được giữ lại ở lần sau.</p></article>
-            <article><h3>Đề thi tùy chọn</h3><p>Khi cập nhật AI Study Pack, bạn có thể bổ sung đề Midterm/Final công khai để AI hiểu dạng câu hỏi lịch sử.</p></article>
+            <article><h3>Xóa môn không xóa dữ liệu</h3><p>Xóa môn khỏi danh sách ứng dụng không bao giờ xóa thư mục bạn đã tải.</p></article>
+            <article><h3>AI Study Pack</h3><p>Tạo hoặc cập nhật một ZIP học riêng cho mỗi môn đã đồng bộ.</p></article>
+            <article><h3>Đề thi Coursewave tùy chọn</h3><p>Có thể bổ sung đề Midterm/Final công khai để tham khảo dạng đánh giá lịch sử.</p></article>
           </div>
         </div>
       </section>
@@ -118,16 +121,21 @@
         <div class="container split">
           <div>
             <p class="eyebrow">AI Study Pack</p>
-            <h2 id="ai-title">Chuẩn bị từng môn để học cùng AI, theo cách cục bộ.</h2>
-            <p>Sau khi đồng bộ, bạn có thể tạo một ZIP AI Study Pack độc lập cho mỗi môn. ZIP chứa hướng dẫn học, bản đồ môn học và tài liệu đã được lập chỉ mục.</p>
+            <h2 id="ai-title">Tạo một gói học riêng cho từng môn.</h2>
+            <p>Sau khi đồng bộ, bạn có thể tạo hoặc cập nhật <code>&lt;CourseName&gt;_AI_Study_Pack.zip</code> trên máy. Khi cần, bạn tự tải ZIP đó lên ChatGPT để học cùng tài liệu môn.</p>
           </div>
           <ul class="check-list">
             <li>Tạo một ZIP riêng cho từng môn.</li>
             <li>Không dùng API AI bên ngoài khi chuẩn bị.</li>
-            <li>Đề thi Coursewave là tùy chọn và chỉ dùng để định hướng cách kiểm tra, không thay thế tài liệu giảng viên.</li>
+            <li>Tài liệu giảng viên vẫn là nguồn học chính; refresh dùng lại tài liệu không đổi và giữ pack cũ nếu hủy/lỗi.</li>
             <li>Ứng dụng không tự tải bất kỳ file nào lên ChatGPT.</li>
             <li>Bạn tự quyết định có tải ZIP lên ChatGPT hay không.</li>
           </ul>
+        </div>
+        <div class="container coursewave-card">
+          <h3>Có thể bổ sung đề thi cũ từ HCMUT Coursewave</h3>
+          <p>Khi tạo hoặc cập nhật AI Study Pack, bạn có thể tùy chọn tìm thêm đề Midterm/Final <strong>công khai</strong>. Đề cũ chỉ giúp tham khảo dạng câu hỏi và mức độ nhấn mạnh của các kỳ trước; không dự đoán hay đảm bảo nội dung đề thi tương lai.</p>
+          <p class="quiet">Không cần đăng nhập Google, OAuth, API key hoặc quyền Drive riêng. Nếu Coursewave không sẵn sàng, Study Pack cục bộ vẫn hoạt động.</p>
         </div>
       </section>
 
@@ -142,6 +150,8 @@
             <li>Đăng nhập diễn ra trên trang BK-LMS trong Chrome.</li>
             <li>Không có máy chủ đám mây của BK-LMS Downloader lưu tài liệu môn học.</li>
             <li>Không có theo dõi, phân tích hành vi hoặc API AI trong quá trình chuẩn bị Study Pack.</li>
+            <li>Coursewave chỉ được truy cập khi bạn bật tùy chọn và chỉ dùng nguồn công khai.</li>
+            <li>Ứng dụng không tự tải AI Study Pack lên ChatGPT.</li>
           </ul>
         </div>
       </section>
@@ -150,12 +160,13 @@
         <div class="container download-grid">
           <div>
             <p class="eyebrow">Tải về</p>
-            <h2 id="download-title">Chọn kênh cài đặt phù hợp</h2>
-            <p>Windows nên cài từ Microsoft Store. GitHub Releases cung cấp bản Windows và các bản macOS đóng gói.</p>
+            <h2 id="download-title">Tải BK-LMS Downloader</h2>
+            <p>Microsoft Store là kênh cài đặt Windows được khuyến nghị. GitHub Releases có bản Windows, macOS arm64 và macOS x64.</p>
+            <p class="status-notice"><strong>Muốn dùng Coursewave v1.3.0 ngay?</strong> Bản cập nhật v1.3.0 hiện đang chờ Microsoft Store duyệt. Trong thời gian đó, hãy tải bản mới nhất từ GitHub Releases.</p>
           </div>
           <div class="download-actions">
             <a class="button button-primary" href="https://apps.microsoft.com/detail/9N1TTL7WPJT0">Microsoft Store cho Windows</a>
-            <a class="button button-secondary" href="https://github.com/TiKyisme/bk-lms-downloader/releases/latest">GitHub Releases và macOS</a>
+            <a class="button button-secondary" href="https://github.com/TiKyisme/bk-lms-downloader/releases/latest">Tải v1.3.0 từ GitHub Releases</a>
           </div>
         </div>
       </section>
@@ -166,6 +177,9 @@
           <details><summary>Ứng dụng có lưu mật khẩu BK-LMS không?</summary><p>Không. Bạn đăng nhập trực tiếp trong Chrome trên trang BK-LMS.</p></details>
           <details><summary>Có cần cài Python không?</summary><p>Không cần cho bản ứng dụng đóng gói từ Microsoft Store hoặc GitHub Releases.</p></details>
           <details><summary>AI Study Pack có tự gửi tài liệu cho AI không?</summary><p>Không. Ứng dụng chỉ tạo ZIP cục bộ; bạn tự chọn có tải ZIP đó lên ChatGPT hay không.</p></details>
+          <details><summary>Coursewave có cần đăng nhập Google không?</summary><p>Không. Tùy chọn này chỉ xem nguồn Coursewave và Google Drive công khai; không dùng OAuth, API key hay quyền Drive riêng.</p></details>
+          <details><summary>Coursewave có dự đoán đề thi không?</summary><p>Không. Đề cũ chỉ dùng để tham khảo dạng câu hỏi, phong cách đánh giá và trọng tâm lịch sử; tài liệu giảng viên vẫn là nguồn chính.</p></details>
+          <details><summary>Vì sao Microsoft Store chưa có v1.3.0?</summary><p>Bản v1.3.0 đã phát hành trên GitHub và đang chờ Microsoft Store duyệt cập nhật. Trong thời gian đó có thể tải v1.3.0 từ GitHub Releases.</p></details>
           <details><summary>Dự án có phải sản phẩm chính thức của HCMUT không?</summary><p>Không. Đây là dự án mã nguồn mở không chính thức, không liên kết với HCMUT hoặc BK-LMS.</p></details>
         </div>
       </section>
