@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.3.0 - Unreleased
+## 1.3.0 - 2026-09-23
 
 - Add optional HCMUT Coursewave enrichment for publicly accessible Midterm and
   Final exam sources, with conservative matching, bounded Drive discovery, and
