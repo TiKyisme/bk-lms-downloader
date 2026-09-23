@@ -19,7 +19,14 @@ def pyinstaller_arguments(platform_name: str = sys.platform) -> list[str]:
         app_name = "BK-LMS-Downloader"
         icon_path = WINDOWS_ICON
         data_separator = ";"
-        platform_arguments = ["--onefile"]
+        platform_arguments = [
+            "--onefile",
+            "--hidden-import", "win32com.client",
+            "--hidden-import", "pythoncom",
+            "--hidden-import", "pywintypes",
+            "--exclude-module", "win32ui",
+            "--exclude-module", "Pythonwin",
+        ]
     elif platform_name == "darwin":
         app_name = "BK-LMS Downloader"
         icon_path = MACOS_ICON
@@ -47,6 +54,8 @@ def pyinstaller_arguments(platform_name: str = sys.platform) -> list[str]:
         "pypdf",
         "--hidden-import",
         "pptx",
+        "--collect-all",
+        "fitz",
         "--collect-all",
         "selenium",
         "--add-data",

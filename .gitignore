@@ -23,6 +23,7 @@ dist/
 /ai-self-test-diagnostics.log
 /sync-self-test-error.log
 /scroll-self-test-error.log
+/lite-runtime-self-test.log
 
 # IDE / OS
 .vscode/

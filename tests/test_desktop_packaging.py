@@ -43,3 +43,12 @@ def test_both_platforms_bundle_current_ai_and_gui_dependencies():
         assert "pypdf" in rendered
         assert "pptx" in rendered
         assert "selenium" in rendered
+        assert "fitz" in rendered
+
+
+def test_windows_collects_lite_com_runtime_only_on_windows():
+    windows = " ".join(build_desktop.pyinstaller_arguments("win32"))
+    macos = " ".join(build_desktop.pyinstaller_arguments("darwin"))
+    assert "win32com" in windows and "pythoncom" in windows and "pywintypes" in windows
+    assert "win32com" not in macos
+    assert "win32ui" in windows and "Pythonwin" in windows
