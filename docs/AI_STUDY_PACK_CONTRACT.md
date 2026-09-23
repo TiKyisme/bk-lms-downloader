@@ -33,6 +33,8 @@ overwritten; collisions use a deterministic numeric suffix.
   in-progress, mastered, weak, source-gap, and skipped states.
 - `05_RESUME_STATE.md` defines the compact current chapter, section,
   micro-topic, completed/weak/skipped topics, recent assessments, and next topic.
+- `06_EXAM_INDEX.md` records optional public historical Midterm/Final sources as
+  `past_exam` evidence. It is absent only in legacy packs before migration.
 
 ## Teaching evidence
 
@@ -44,6 +46,8 @@ overwritten; collisions use a deterministic numeric suffix.
 - Lecturer/course material has priority over included references, which have
   priority over general model knowledge. Unsupported claims must be labelled
   `[Outside supplied course material]`.
+- Past exams influence assessment format and historical emphasis only. They do
+  not override lecturer material or justify guaranteed exam predictions.
 - Missing, duplicate, link-only, media-pending, unsupported, or failed items are
   recorded in the source index and coverage tracker; no content is invented.
 

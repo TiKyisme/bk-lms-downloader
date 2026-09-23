@@ -44,7 +44,7 @@ No Python or Git setup is needed for the normal GUI experience.
    to stop safely; completed files stay in place.
 6. Run **Đồng bộ tất cả** again later; existing unchanged files are skipped.
 7. To study with ChatGPT: tick one or more synced courses, choose **Công cụ →
-   Chuẩn bị đã chọn cho AI**, then upload the generated one-ZIP-per-course
+   Tạo / cập nhật AI Study Pack đã chọn**, then upload the generated one-ZIP-per-course
    **`<CourseName>_AI_Study_Pack.zip`** files. Each ZIP bootstraps its own tutor
    from `00_START_HERE.md`; no large setup prompt is required.
 
@@ -76,6 +76,7 @@ will be added when a current manually verified image is available.
 - Passive GitHub Release update notice—updates only open after your click.
 - Hướng dẫn nhanh cho hồ sơ mới; có thể mở lại từ **Trợ giúp**.
 - Phản hồi trong ứng dụng mở trang GitHub đã điền sẵn để bạn tự xem và gửi.
+- Tùy chọn bổ sung đề Midterm/Final công khai từ HCMUT Coursewave khi cập nhật AI Study Pack.
 - Local **Công cụ → Chuẩn bị cho AI** preparation for checked courses or all
   courses—also included in the Windows release.
 
@@ -126,8 +127,8 @@ There is no Complete Archive mode, no `COURSE_*` output tree, no
 
 ## Optional AI preparation
 
-For downloaded courses, choose **Công cụ → Chuẩn bị đã chọn cho AI** or
-**Chuẩn bị tất cả cho AI**. Each course gets exactly one local
+For downloaded courses, choose **Công cụ → Tạo / cập nhật AI Study Pack đã chọn** or
+**Tạo / cập nhật AI Study Pack tất cả**. Each course gets exactly one local
 **`<CourseName>_AI_Study_Pack.zip`** ready for ChatGPT upload. The pack starts
 with the numbered control files `00_START_HERE.md` through
 `05_RESUME_STATE.md`; it also retains original lecture visual sources when
@@ -135,6 +136,10 @@ diagrams matter. Intermediate extraction and `AI_Knowledge` output are not
 left beside the course.
 Desktop releases include this local preparation feature; it does not add AI
 chat, cloud accounts, API keys, video transcription, or CUDA requirements.
+
+Coursewave bổ sung đề thi là tùy chọn, chỉ dùng liên kết công khai, và chỉ thu
+thập Midterm/Final. Tài liệu giảng viên vẫn là nguồn dạy học chính; đề cũ chỉ
+giúp AI điều chỉnh dạng câu hỏi và mức độ nhấn mạnh. Xem [Coursewave và đề thi](docs/COURSEWAVE_EXAMS.md).
 
 See [tools/README_prepare_ai_course.md](tools/README_prepare_ai_course.md) for
 the standalone source-tool workflow.
@@ -149,8 +154,8 @@ security, packaging, Store-versioning, Chrome, and AI Study Pack guidance.
 
 ## Trạng thái phát hành
 
-Bản công khai hiện tại là **v1.1.4**. Nhánh phát triển đang chuẩn bị **v1.2.0**;
-không có tag hoặc bản phát hành v1.2.0 nào được tạo từ mã nguồn này.
+Bản công khai hiện tại là **v1.2.0**. Nhánh phát triển đang chuẩn bị **v1.3.0**;
+không có tag hoặc bản phát hành v1.3.0 nào được tạo từ mã nguồn này.
 
 ## CLI (advanced)
 

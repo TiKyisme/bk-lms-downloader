@@ -64,6 +64,8 @@ from bklms_downloader.ai_study_pack import (
     validate_ai_study_pack,
     write_study_navigation,
 )
+from bklms_downloader.study_pack_refresh import RefreshPlan, StudyPackRefresher, snapshot_sources
+from bklms_downloader.zip_safety import safe_extract_zip
 
 
 # -----------------------------------------------------------------------------
@@ -361,7 +363,7 @@ def prepare_input(input_path: Path, work_dir: Path) -> tuple[Path, Optional[Path
         extracted.mkdir(parents=True, exist_ok=True)
         print(f"[1/6] Giải nén: {input_path.name}")
         with zipfile.ZipFile(input_path, "r") as zf:
-            zf.extractall(extracted)
+            safe_extract_zip(zf, extracted)
         return find_course_root(extracted), extracted
 
     raise ValueError("--input phải là thư mục hoặc file .zip")
@@ -788,6 +790,60 @@ class CoursePreparer:
 
         self.course_name = getattr(args, "course_name", source_root.name)
 
+    def load_reused(self, reusable_source_paths: set[str]) -> None:
+        """Load compatible derived records copied from an existing pack workspace."""
+        documents_path = self.meta_dir / "documents.jsonl"
+        chunks_path = self.meta_dir / "corpus.jsonl"
+        try:
+            entries = [json.loads(line) for line in documents_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        except (OSError, json.JSONDecodeError):
+            entries = []
+        for entry in entries:
+            if entry.get("source_path") not in reusable_source_paths:
+                continue
+            try:
+                self.records.append(DocumentRecord(**entry))
+            except TypeError:
+                continue
+        try:
+            entries = [json.loads(line) for line in chunks_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        except (OSError, json.JSONDecodeError):
+            entries = []
+        reusable_ids = {record.source_id for record in self.records}
+        for entry in entries:
+            if entry.get("source_id") not in reusable_ids:
+                continue
+            try:
+                self.chunks.append(ChunkRecord(**entry))
+            except TypeError:
+                continue
+        visual_path = self.meta_dir / "visual_manifest.json"
+        try:
+            visuals = json.loads(visual_path.read_text(encoding="utf-8"))
+            self.visual_sources = [item for item in visuals if item.get("source_id") in reusable_ids]
+        except (OSError, json.JSONDecodeError, TypeError):
+            self.visual_sources = []
+
+    def remove_stale_derivatives(self, source_paths: set[str]) -> None:
+        """Remove old derived files only for changed/removed manifest entries."""
+        try:
+            entries = [json.loads(line) for line in (self.meta_dir / "documents.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+        except (OSError, json.JSONDecodeError):
+            entries = []
+        stale_records = [entry for entry in entries if entry.get("source_path") in source_paths]
+        stale_ids = {str(record.get("source_id", "")) for record in stale_records}
+        for record in stale_records:
+            for relative_path in (record.get("output_path"), record.get("source_copy_path")):
+                if relative_path:
+                    (self.output_root / relative_path).unlink(missing_ok=True)
+        try:
+            chunks = [json.loads(line) for line in (self.meta_dir / "corpus.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+        except (OSError, json.JSONDecodeError):
+            chunks = []
+        for chunk in chunks:
+            if chunk.get("source_id") in stale_ids and chunk.get("chunk_path"):
+                (self.output_root / str(chunk["chunk_path"])).unlink(missing_ok=True)
+
     def check_cancelled(self) -> None:
         cancel_event = getattr(self.args, "cancel_event", None)
         if cancel_event is not None and cancel_event.is_set():
@@ -1144,9 +1200,9 @@ class CoursePreparer:
             )
         )
 
-    def process(self) -> None:
+    def process(self, files: Optional[list[Path]] = None) -> None:
         self.check_cancelled()
-        files = iter_source_files(self.source_root)
+        files = files if files is not None else iter_source_files(self.source_root)
         print(f"[2/6] Source root: {self.source_root}")
         print(f"      Phát hiện {len(files)} file")
 
@@ -1372,6 +1428,18 @@ def validate_args(args) -> None:
         raise ValueError("--chunk-overlap phải nhỏ hơn --chunk-chars")
 
 
+def extract_pack_workspace(pack: Path, destination: Path) -> None:
+    """Extract a known Study Pack without allowing archive path traversal."""
+    destination.mkdir(parents=True, exist_ok=True)
+    root = destination.resolve()
+    with zipfile.ZipFile(pack) as archive:
+        for member in archive.infolist():
+            target = (root / member.filename).resolve()
+            if root != target and root not in target.parents:
+                raise ValueError("Study Pack archive contains an unsafe path")
+            archive.extract(member, root)
+
+
 def run_preparation(args) -> Path:
     """Build one course in a private temporary workspace and return its ZIP."""
     validate_args(args)
@@ -1400,6 +1468,11 @@ def run_preparation(args) -> Path:
         work_dir = Path(tmp)
         source_root, _ = prepare_input(args.input, work_dir)
         output_root = work_dir / "study_pack"
+        existing_pack = getattr(args, "incremental_existing_pack", None)
+        reuse_paths = set(getattr(args, "incremental_reuse_paths", ()) or ())
+        stale_paths = set(getattr(args, "incremental_stale_paths", ()) or ())
+        if existing_pack:
+            extract_pack_workspace(Path(existing_pack), output_root)
 
         print("=" * 78)
         print("PREPARE AI COURSE")
@@ -1412,8 +1485,22 @@ def run_preparation(args) -> Path:
 
         args.archive_destination = requested_destination
         preparer = CoursePreparer(args, source_root, output_root)
-        preparer.process()
+        if existing_pack:
+            preparer.remove_stale_derivatives(stale_paths)
+            preparer.load_reused(reuse_paths)
+            files = [path for path in iter_source_files(source_root) if rel(path, source_root) not in reuse_paths]
+            preparer.process(files)
+        else:
+            preparer.process()
         pack_path = preparer.study_pack_path
+        pack_path = StudyPackRefresher().finalize(
+            candidate_pack=pack_path,
+            final_pack=pack_path,
+            source_root=source_root,
+            course_code="",
+            course_name=preparer.course_name,
+            plan=RefreshPlan("missing", new_sources=tuple(snapshot_sources(source_root))),
+        )
 
     print()
     print("=" * 78)

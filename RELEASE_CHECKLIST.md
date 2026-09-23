@@ -1,4 +1,4 @@
-# BK-LMS Downloader v1.2.0 release checklist
+# BK-LMS Downloader v1.3.0 release checklist
 
 Complete this manual checklist before creating the public tag.
 
@@ -7,7 +7,7 @@ Complete this manual checklist before creating the public tag.
 - [ ] Windows EXE is built as `dist/BK-LMS-Downloader.exe`.
 - [ ] Windows EXE embeds `BK-LMS-Downloader-icon-blue.ico`, verified by the build script.
 - [ ] Release workflow produces Windows, macOS arm64, and macOS x64 assets before one release job.
-- [ ] `python tools/validate_versions.py --tag v1.2.0 --msix-version 1.2.0.0` passes.
+- [ ] `python tools/validate_versions.py --tag v1.3.0 --msix-version 1.3.0.0` passes.
 - [ ] Compare first/cached Chrome startup timings using `--diagnose-chrome`.
 - [ ] Double-click login, reuse a window, close Chrome, then reopen; no duplicate sessions.
 - [ ] Exit the app during startup and verify its controlled browser/service is cleaned up.
@@ -63,4 +63,7 @@ Complete this manual checklist before creating the public tag.
 - [ ] First-run onboarding appears only for a fresh settings profile; legacy v1.1.4 settings do not auto-open it.
 - [ ] Help can replay onboarding and open the feedback dialog without BK-LMS login.
 - [ ] Feedback opens a user-reviewed GitHub issue page and sends no data automatically.
-- [ ] Create `v1.2.0` only after all above smoke tests pass.
+- [ ] Coursewave remains optional; inaccessible public Drive sources do not block local AI Study Pack creation.
+- [ ] Exact Coursewave code match, ambiguous chooser, cache, refresh, and 06_EXAM_INDEX.md pass synthetic acceptance checks.
+- [ ] Refresh preserves the previous valid Study Pack on cancellation or failure.
+- [ ] Create `v1.3.0` only after all above smoke tests pass.

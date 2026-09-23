@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.0 - Unreleased
+
+- Add optional HCMUT Coursewave enrichment for publicly accessible Midterm and
+  Final exam sources, with conservative matching, bounded Drive discovery, and
+  local verified caching.
+- Add manifest-enabled AI Study Pack refresh, freshness tracking, historical
+  exam indexing, and exam-aware assessment guidance without changing lecturer
+  materials as the teaching source of truth.
+
 ## 1.2.0 - 2026-09-21
 
 - Add a Vietnamese static product website, first-run guided onboarding, and an

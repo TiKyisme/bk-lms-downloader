@@ -33,6 +33,10 @@ For releases containing product-website, onboarding, or feedback changes, also
 verify the GitHub Pages deployment, a fresh-profile tutorial, legacy-profile
 migration, Help replay, and the user-reviewed feedback URL flow.
 
+For Coursewave/exam refresh releases, also verify optional public-source
+enrichment, cache integrity, manifest migration, 06_EXAM_INDEX.md, unchanged
+pack reuse, and previous-ZIP preservation on cancellation or failure.
+
 Do not rewrite published tags or release history. Native macOS validation must
 run on matching macOS runners or hardware; Store submission and certification
 are external release activities.

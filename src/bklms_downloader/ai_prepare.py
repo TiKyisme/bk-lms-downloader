@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import io
+import json
 import sys
 import tempfile
 import traceback
@@ -16,6 +17,8 @@ from typing import Callable, Iterable
 from .app_logging import get_logger
 from .ai_study_pack import NAVIGATION_FILES, validate_ai_study_pack
 from .models import Course
+from .study_pack_refresh import CoursewaveEnricher, StudyPackRefresher, plan_refresh
+from .zip_safety import safe_extract_zip
 
 
 LOG = get_logger(__name__)
@@ -198,7 +201,7 @@ def _ai_runtime_self_test() -> Path:
                     raise RuntimeError("AI runtime self-test mixed course source data")
             with tempfile.TemporaryDirectory(prefix="bklms_ai_pack_roundtrip_") as unpacked:
                 with zipfile.ZipFile(pack) as archive:
-                    archive.extractall(unpacked)
+                    safe_extract_zip(archive, Path(unpacked))
                 unpacked_validation = validate_ai_study_pack(Path(unpacked))
             if unpacked_validation.errors:
                 raise RuntimeError(
@@ -280,6 +283,8 @@ class AICoursePreparer:
         self.dependency_importer = dependency_importer
         self.pipeline_loader = pipeline_loader
         self._pipeline: ModuleType | None = None
+        self.last_enrichment_warnings: tuple[str, ...] = ()
+        self.last_refresh_state = "missing"
 
     def prepare(
         self,
@@ -287,6 +292,12 @@ class AICoursePreparer:
         output: Path | None = None,
         *,
         course_name: str | None = None,
+        course_code: str = "",
+        existing_pack: Path | None = None,
+        enrich_exams: bool = False,
+        coursewave_enricher: CoursewaveEnricher | None = None,
+        choose_coursewave_candidate=None,
+        coursewave_progress: Callable[[str], None] | None = None,
         cancel_event=None,
     ) -> Path:
         missing = missing_ai_dependencies(self.dependency_importer)
@@ -306,20 +317,68 @@ class AICoursePreparer:
         if not self.script_path.is_file():
             raise AIPreparationError("Không tìm thấy thành phần chuẩn bị AI trong ứng dụng.")
 
+        owned_pack = Path(existing_pack).expanduser().resolve() if existing_pack else None
+        if owned_pack is not None and not owned_pack.is_file():
+            owned_pack = None
+        if owned_pack is None:
+            owned_pack = self._find_owned_pack(destination, course_name or source_root.name)
+        refresh_plan = plan_refresh(owned_pack, source_root)
+        self.last_refresh_state = refresh_plan.state
+        enrichment = None
+        if enrich_exams:
+            enrichment = (coursewave_enricher or CoursewaveEnricher()).enrich(
+                course_code=course_code,
+                course_name=course_name or source_root.name,
+                cancel_event=cancel_event,
+                choose_candidate=choose_coursewave_candidate,
+                progress_callback=coursewave_progress,
+            )
+        self.last_enrichment_warnings = tuple(enrichment.warnings) if enrichment else ()
+        if refresh_plan.state == "up_to_date" and owned_pack is not None and not enrich_exams:
+            return owned_pack
+
         try:
             pipeline = self._pipeline or self.pipeline_loader(self.script_path)
             self._pipeline = pipeline
             # The standalone tool prints Vietnamese CLI progress.  Redirect it
             # when embedded in the GUI so a Windows legacy console encoding can
             # never abort a local knowledge-base build.
-            with redirect_stdout(io.StringIO()):
-                output_path = pipeline.run_preparation(
-                    _pipeline_arguments(
-                        source_root,
-                        destination,
-                        course_name or source_root.name,
-                        cancel_event,
+            if refresh_plan.requires_rebuild or owned_pack is None:
+                with tempfile.TemporaryDirectory(prefix="bklms_pack_stage_") as temporary:
+                    stage_destination = Path(temporary)
+                    with redirect_stdout(io.StringIO()):
+                        output_path = pipeline.run_preparation(
+                            _pipeline_arguments(
+                                source_root,
+                                stage_destination,
+                                course_name or source_root.name,
+                                cancel_event,
+                                existing_pack=owned_pack if refresh_plan.state == "dirty" else None,
+                                refresh_plan=refresh_plan,
+                            )
+                        )
+                    output_path = self._finalize_refresh(
+                        candidate=output_path,
+                        existing_pack=owned_pack,
+                        destination=destination,
+                        source_root=source_root,
+                        course_code=course_code,
+                        course_name=course_name or source_root.name,
+                        refresh_plan=refresh_plan,
+                        enrichment=enrichment,
+                        cancel_event=cancel_event,
                     )
+            else:
+                output_path = self._finalize_refresh(
+                    candidate=owned_pack,
+                    existing_pack=owned_pack,
+                    destination=destination,
+                    source_root=source_root,
+                    course_code=course_code,
+                    course_name=course_name or source_root.name,
+                    refresh_plan=refresh_plan,
+                    enrichment=enrichment,
+                    cancel_event=cancel_event,
                 )
         except AIPreparationCancelled:
             raise
@@ -334,12 +393,67 @@ class AICoursePreparer:
             raise AIPreparationError("Chuẩn bị AI không tạo được ZIP hợp lệ.")
         return output_path
 
+    @staticmethod
+    def _next_output_path(destination: Path, candidate: Path) -> Path:
+        target = destination / candidate.name
+        index = 2
+        while target.exists():
+            target = destination / f"{candidate.stem}_{index}{candidate.suffix}"
+            index += 1
+        return target
+
+    @staticmethod
+    def _find_owned_pack(destination: Path, course_name: str) -> Path | None:
+        """Adopt only a manifest-identified v1.2 pack; never guess user ZIP ownership."""
+        if not destination.is_dir():
+            return None
+        matches: list[Path] = []
+        for candidate in destination.glob("*_AI_Study_Pack*.zip"):
+            try:
+                with zipfile.ZipFile(candidate) as archive:
+                    manifest = json.loads(archive.read("meta/study_pack_manifest.json").decode("utf-8"))
+                if manifest.get("course_name") == course_name and manifest.get("one_course_only") is True:
+                    matches.append(candidate.resolve())
+            except (OSError, KeyError, ValueError, zipfile.BadZipFile):
+                continue
+        return matches[0] if len(matches) == 1 else None
+
+    def _finalize_refresh(
+        self,
+        *,
+        candidate: Path,
+        existing_pack: Path | None,
+        destination: Path,
+        source_root: Path,
+        course_code: str,
+        course_name: str,
+        refresh_plan,
+        enrichment,
+        cancel_event,
+    ) -> Path:
+        final_path = existing_pack or self._next_output_path(destination, candidate)
+        exams = enrichment.exams if enrichment is not None and enrichment.authoritative else None
+        return StudyPackRefresher().finalize(
+            candidate_pack=candidate,
+            final_pack=final_path,
+            source_root=source_root,
+            course_code=course_code,
+            course_name=course_name,
+            plan=refresh_plan,
+            exams=exams,
+            enrichment=enrichment,
+            cancel_event=cancel_event,
+        )
+
 
 def _pipeline_arguments(
     course_root: Path,
     destination: Path,
     course_name: str,
     cancel_event=None,
+    *,
+    existing_pack: Path | None = None,
+    refresh_plan=None,
 ) -> SimpleNamespace:
     """Keep GUI preparation local and deterministic: no transcription or cloud."""
     return SimpleNamespace(
@@ -348,6 +462,11 @@ def _pipeline_arguments(
         archive_destination=destination,
         course_name=course_name,
         cancel_event=cancel_event,
+        incremental_existing_pack=existing_pack,
+        incremental_reuse_paths=tuple(getattr(refresh_plan, "reused_sources", ())),
+        incremental_stale_paths=tuple(
+            [*getattr(refresh_plan, "changed_sources", ()), *getattr(refresh_plan, "removed_sources", ())]
+        ),
         include_references=False,
         transcribe=False,
         whisper_model="small",
@@ -365,6 +484,9 @@ class AICoursePreparationResult:
     course: Course
     output: Path | None = None
     error: str | None = None
+    refresh_state: str = "missing"
+    coursewave_enabled: bool = False
+    warnings: tuple[str, ...] = ()
 
     @property
     def succeeded(self) -> bool:
@@ -401,6 +523,8 @@ class AIBatchPreparer:
         course_root_for: CourseRootResolver,
         progress_callback: AIProgressCallback | None = None,
         cancel_event=None,
+        enrich_exams: bool = False,
+        coursewave_selector=None,
     ) -> AIBatchPreparationResult:
         course_list = list(courses)
         if not course_list:
@@ -416,12 +540,47 @@ class AIBatchPreparer:
                 break
             self._emit(progress_callback, "ai_prepare_course_start", course=course, index=index, total=total)
             try:
-                output = preparer.prepare(
-                    course_root_for(course),
-                    course_name=course.display_name,
-                    cancel_event=cancel_event,
+                try:
+                    output = preparer.prepare(
+                        course_root_for(course),
+                        course_name=course.display_name,
+                        course_code=course.code,
+                        existing_pack=Path(course.study_pack_path) if course.study_pack_path else None,
+                        enrich_exams=enrich_exams,
+                        choose_coursewave_candidate=(
+                            (lambda match: coursewave_selector(course, match, cancel_event))
+                            if coursewave_selector is not None
+                            else None
+                        ),
+                        coursewave_progress=(
+                            lambda message: self._emit(
+                                progress_callback,
+                                "coursewave_progress",
+                                course=course,
+                                message=message,
+                            )
+                        ) if enrich_exams else None,
+                        cancel_event=cancel_event,
+                    )
+                except TypeError as exc:
+                    # Third-party/test preparers from v1.2 only accepted the
+                    # stable course-name/cancellation boundary. Keep that
+                    # compatibility while the built-in preparer receives the
+                    # v1.3 refresh context above.
+                    if "unexpected keyword argument" not in str(exc):
+                        raise
+                    output = preparer.prepare(
+                        course_root_for(course),
+                        course_name=course.display_name,
+                        cancel_event=cancel_event,
+                    )
+                result = AICoursePreparationResult(
+                    course=course,
+                    output=output,
+                    refresh_state=getattr(preparer, "last_refresh_state", "missing"),
+                    coursewave_enabled=enrich_exams,
+                    warnings=tuple(getattr(preparer, "last_enrichment_warnings", ())),
                 )
-                result = AICoursePreparationResult(course=course, output=output)
             except AIPreparationCancelled:
                 cancelled = True
                 break

@@ -135,6 +135,7 @@ def write_study_navigation(
     course_name: str,
     records: list[dict],
     chunks: list[dict] | None = None,
+    exams: list[dict] | None = None,
 ) -> None:
     """Write one authoritative, source-grounded tutor navigation layer."""
     root = Path(root)
@@ -266,6 +267,21 @@ def write_study_navigation(
         if record.get("note"):
             source_lines.append(f"- Note: {record['note']}")
         source_lines.append("")
+    if exams:
+        source_lines.extend(("## Past exams", "", "Past exams are lower-priority assessment evidence, not teaching truth.", ""))
+        for exam in exams:
+            source_lines.extend(
+                (
+                    f"### `{exam.get('stable_id', '')}` — {exam.get('original_name', '')}",
+                    "",
+                    "- Source role: `past_exam`",
+                    f"- Type: `{exam.get('exam_type', 'unknown_exam')}`",
+                    f"- Term/year: `{exam.get('term') or 'unknown'}`",
+                    f"- Extraction: `{exam.get('extraction_status', 'visual_unparsed')}`",
+                    f"- SHA-256: `{exam.get('sha256', '')}`",
+                    "",
+                )
+            )
     _write_text(root / "03_SOURCE_INDEX.md", "\n".join(source_lines))
 
     coverage_lines = [
@@ -329,6 +345,7 @@ Read this file first, then immediately inspect:
 3. `03_SOURCE_INDEX.md`
 4. `04_COVERAGE_TRACKER.md`
 5. `05_RESUME_STATE.md`
+6. `06_EXAM_INDEX.md` when present
 
 Next inspect the supplied lecturer/course materials under `sources/`, `documents/`, and `chapters/`.
 Use the source index and `meta/corpus.jsonl` to trace every teaching claim to a stable `source_id` and an available page, slide, timestamp, or other locator.
@@ -387,6 +404,10 @@ Increase application difficulty and reduce repetition when reasoning is consiste
 ## Hard prohibitions
 
 Do not theory-dump an entire chapter, silently skip source material, invent missing lecturer content, reveal assessment answers before the learner responds, or advance solely because an MCQ letter was correct. Do not provide a full homework solution when guided reasoning is the appropriate teaching method.
+
+## Historical exam evidence
+
+When `06_EXAM_INDEX.md` contains accessible past exams, treat them as `past_exam` evidence. Lecturer/course materials remain the source of truth for teaching content. Use past exams only to adapt assessment format, difficulty, transformations, and historical topic emphasis. Never copy a question verbatim, reveal answers before the learner responds, or claim that a topic is guaranteed to appear. You may say that a topic appears repeatedly in the supplied historical exams, but not predict what an instructor will ask.
 """,
     )
     _write_text(
@@ -414,7 +435,7 @@ When resuming, trust the most recent explicit learner progress, verify it agains
 
 def _included_pack_paths(root: Path) -> list[Path]:
     paths: list[Path] = []
-    for name in NAVIGATION_FILES:
+    for name in NAVIGATION_FILES + ("06_EXAM_INDEX.md",):
         path = root / name
         if path.is_file():
             paths.append(path)
@@ -422,7 +443,16 @@ def _included_pack_paths(root: Path) -> list[Path]:
         path = root / directory
         if path.is_dir():
             paths.extend(item for item in path.rglob("*") if item.is_file())
-    for name in ("documents.jsonl", "corpus.jsonl", "stats.json", "visual_manifest.json", "study_pack_manifest.json"):
+    for name in (
+        "documents.jsonl",
+        "corpus.jsonl",
+        "stats.json",
+        "visual_manifest.json",
+        "study_pack_manifest.json",
+        "pack_manifest.json",
+        "source_manifest.json",
+        "exam_manifest.json",
+    ):
         path = root / "meta" / name
         if path.is_file():
             paths.append(path)
@@ -610,6 +640,20 @@ def validate_ai_study_pack(root: Path) -> AIStudyPackValidation:
                     report.errors.append("Absolute path in visual_manifest.json")
         except json.JSONDecodeError:
             report.errors.append("Malformed JSON: visual_manifest.json")
+    exam_path = root / "meta" / "exam_manifest.json"
+    if exam_path.is_file():
+        try:
+            exams = json.loads(exam_path.read_text(encoding="utf-8"))
+            for exam in exams.get("exams", []) if isinstance(exams, dict) else []:
+                retained = exam.get("retained_source_path")
+                if _is_absolute_metadata_path(retained):
+                    report.errors.append("Absolute retained path in exam_manifest.json")
+                elif retained and not (root / str(retained)).is_file():
+                    report.errors.append(f"Exam source missing: {retained}")
+                if exam.get("cache_path"):
+                    report.errors.append("Private cache path in exam_manifest.json")
+        except json.JSONDecodeError:
+            report.errors.append("Malformed JSON: exam_manifest.json")
     for gap in _potential_chapter_gaps(ready):
         report.warnings.append(f"Potential missing Chapter {gap}: no downloaded source detected")
     return report
