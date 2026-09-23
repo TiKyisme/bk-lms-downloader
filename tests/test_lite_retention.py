@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -45,3 +46,34 @@ def test_powerpoint_unavailable_is_conservative(monkeypatch, tmp_path):
     result = lite.verify_pptx_pdf(tmp_path / "deck.pptx", tmp_path / "deck.pdf")
     assert result.verdict == "UNVERIFIED"
     assert result.reason == "RuntimeError"
+
+
+def test_pptx_only_verified_conversion_replaces_source(monkeypatch, tmp_path):
+    (tmp_path / "sources").mkdir(); (tmp_path / "documents").mkdir(); (tmp_path / "meta").mkdir()
+    (tmp_path / "sources/deck.pptx").write_bytes(os.urandom(2 * 1024 * 1024))
+    (tmp_path / "documents/deck.md").write_text("unique deck", encoding="utf-8")
+    item = record("deck", "sources/deck.pptx", "documents/deck.md")
+    def convert(_source, destination):
+        destination.write_bytes(b"B" * 1024)
+        return lite.EquivalenceResult("FULL_EQUIVALENCE", 2, 2, 2, 1.0, 2, "verified")
+    monkeypatch.setattr(lite, "verify_pptx_only_conversion", convert)
+    decisions = lite.optimize_workspace(tmp_path, [item])
+    assert decisions[0]["decision"] == "REPLACE_WITH_VERIFIED_PDF"
+    assert item.source_copy_path == "sources/deck.pdf"
+    assert not (tmp_path / "sources/deck.pptx").exists()
+
+
+def test_pptx_only_failed_conversion_keeps_original(monkeypatch, tmp_path):
+    (tmp_path / "sources").mkdir(); (tmp_path / "documents").mkdir(); (tmp_path / "meta").mkdir()
+    (tmp_path / "sources/deck.pptx").write_bytes(b"A" * 100)
+    (tmp_path / "documents/deck.md").write_text("unique deck", encoding="utf-8")
+    item = record("deck", "sources/deck.pptx", "documents/deck.md")
+    monkeypatch.setattr(lite, "verify_pptx_only_conversion", lambda *_: lite.EquivalenceResult(reason="RuntimeError"))
+    assert lite.optimize_workspace(tmp_path, [item]) == []
+    assert (tmp_path / "sources/deck.pptx").is_file()
+
+
+def test_existing_phase_one_decisions_survive_conservative_phase_two(tmp_path):
+    (tmp_path / "sources").mkdir(); (tmp_path / "documents").mkdir(); (tmp_path / "meta").mkdir()
+    (tmp_path / "meta/lite_retention.json").write_text(json.dumps({"sources":[{"source_id":"old","decision":"OMIT_VERIFIED_DUPLICATE","represented_by":"kept"}]}),encoding="utf-8")
+    assert lite.optimize_workspace(tmp_path, []) == [{"source_id":"old","decision":"OMIT_VERIFIED_DUPLICATE","represented_by":"kept"}]

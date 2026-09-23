@@ -59,6 +59,5 @@ store-package/
 .visual-retention-review/
 .visual-retention-review.zip
 .visual-retention-analysis/
-/mmt_ai_lite_test.zip
-/mmt_ai.zip
+/mmt_ai*.zip
 /study-pack-size-audit.txt
