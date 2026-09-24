@@ -1,4 +1,4 @@
-# BK-LMS Downloader v1.3.0 release checklist
+# BK-LMS Downloader v1.4.0 release checklist
 
 Complete this manual checklist before creating the public tag.
 
@@ -7,7 +7,7 @@ Complete this manual checklist before creating the public tag.
 - [ ] Windows EXE is built as `dist/BK-LMS-Downloader.exe`.
 - [ ] Windows EXE embeds `BK-LMS-Downloader-icon-blue.ico`, verified by the build script.
 - [ ] Release workflow produces Windows, macOS arm64, and macOS x64 assets before one release job.
-- [ ] `python tools/validate_versions.py --tag v1.3.0 --msix-version 1.3.0.0` passes.
+- [ ] `python tools/validate_versions.py --tag v1.4.0 --msix-version 1.4.0.0` passes.
 - [ ] Compare first/cached Chrome startup timings using `--diagnose-chrome`.
 - [ ] Double-click login, reuse a window, close Chrome, then reopen; no duplicate sessions.
 - [ ] Exit the app during startup and verify its controlled browser/service is cleaned up.
@@ -47,6 +47,7 @@ Complete this manual checklist before creating the public tag.
 - [ ] Packaged `BK-LMS-Downloader.exe --self-test-ai` exits successfully.
 - [ ] Packaged `BK-LMS-Downloader.exe --self-test-sync` proves normal → timeout skipped → normal recovery.
 - [ ] Packaged `BK-LMS-Downloader.exe --self-test-scroll` validates nested wheel ownership with synthetic courses and activity.
+- [ ] Packaged `BK-LMS-Downloader.exe --self-test-lite-runtime` validates Lite dependencies.
 - [ ] Packaged `BK-LMS-Downloader.exe --diagnose-ai` reports all AI imports and synthetic batch success.
 - [ ] AI Study Pack accounts for every discovered source.
 - [ ] Chapter/module detection works for `Ch1`, `Ch 2`, `Ch3_4`, and `Chapter 3-4`.
@@ -55,6 +56,12 @@ Complete this manual checklist before creating the public tag.
 - [ ] AI Study Pack ZIP round-trip validator passes with no structural errors.
 - [ ] Study Pack contains no credentials, private absolute metadata paths, or application logs.
 - [ ] Original lecturer visual sources remain accessible from the Study Pack.
+- [ ] Verified duplicate representations retain source traceability.
+- [ ] Verified PPTX-only conversion preserves exact slide/page count.
+- [ ] PowerPoint unavailable falls back to conservative original retention.
+- [ ] Study Pack completion feedback shows the final ZIP size.
+- [ ] Coursewave exam binaries remain preserved.
+- [ ] No real course material or generated pack is committed.
 - [ ] Student can upload each independent ZIP and the package bootstraps tutoring without a large setup prompt.
 - [ ] GUI has no obsolete current-course Delete or AI modes at common laptop sizes.
 - [ ] No credentials, cookies, or session material are present in repository files or logs.
@@ -66,4 +73,5 @@ Complete this manual checklist before creating the public tag.
 - [ ] Coursewave remains optional; inaccessible public Drive sources do not block local AI Study Pack creation.
 - [ ] Exact Coursewave code match, ambiguous chooser, cache, refresh, and 06_EXAM_INDEX.md pass synthetic acceptance checks.
 - [ ] Refresh preserves the previous valid Study Pack on cancellation or failure.
-- [ ] Create `v1.3.0` only after all above smoke tests pass.
+- [ ] Validate `v1.4.0` / `1.4.0.0` only after all above smoke tests pass.
+- [ ] Create `v1.4.0` only after all above smoke tests pass.
