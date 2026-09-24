@@ -116,6 +116,22 @@ jobs:
             throw "Packaged GUI scroll/layout validation failed."
           }
 
+      - name: Validate packaged Lite retention runtime
+        shell: pwsh
+        run: |
+          $liteTest = Start-Process `
+            -FilePath ./dist/BK-LMS-Downloader.exe `
+            -ArgumentList "--self-test-lite-runtime" `
+            -Wait `
+            -PassThru `
+            -WindowStyle Hidden
+          if ($liteTest.ExitCode -ne 0) {
+            if (Test-Path "lite-runtime-self-test.log") {
+              Get-Content "lite-runtime-self-test.log"
+            }
+            throw "Packaged Lite retention runtime validation failed."
+          }
+
       - name: Prepare Windows release asset
         shell: pwsh
         run: |

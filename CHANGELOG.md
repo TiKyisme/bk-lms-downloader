@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.4.0 - 2026-09-24
+
+- Add safe local AI Study Pack Lite optimization: verified duplicate
+  PPTX/PDF representations may be deduplicated, and eligible PPTX-only
+  lecturer material may use a smaller verified full-deck PDF.
+- Keep original sources whenever verification, PowerPoint, rendering, or size
+  benefit checks fail; preserve source identity, normalized knowledge, chapter
+  evidence, Coursewave exams, and local refresh safety.
+- Bundle the Lite visual-verification runtime in the Windows app and show the
+  final Study Pack ZIP size after generation.
+- Validation example: a Computer Networks pack changed from 125.80 MiB to
+  47.62 MiB; this is not a guaranteed reduction for every course.
+
 ## 1.3.0 - 2026-09-23
 
 - Add optional HCMUT Coursewave enrichment for publicly accessible Midterm and
