@@ -1404,6 +1404,14 @@ class App(ctk.CTk):
             return value
 
     @staticmethod
+    def _format_pack_size(path: Path | None) -> str:
+        try:
+            size = Path(path).stat().st_size if path is not None else 0
+        except OSError:
+            return ""
+        return f" ({size / (1024 * 1024):.1f} MB)"
+
+    @staticmethod
     def _status_text(course: Course) -> tuple[str, str]:
         if course.last_status == "cancelled":
             return "Đã hủy", THEME.muted_text
@@ -2129,7 +2137,7 @@ class App(ctk.CTk):
             self.progress.set(event["index"] / max(1, event["total"]))
             if result.succeeded:
                 action = "cập nhật lại" if result.refresh_state in {"dirty", "legacy"} else "đã sẵn sàng"
-                self._log(f"[AI][DONE] {result.course.display_name} — {action}")
+                self._log(f"[AI][DONE] {result.course.display_name} — {action}{self._format_pack_size(result.output)}")
                 for warning in result.warnings:
                     self._log(f"[COURSEWAVE][SKIP] {warning}")
             else:
@@ -2249,7 +2257,7 @@ class App(ctk.CTk):
             return
 
         if not failed:
-            pack_lines = [str(result.output) for result in succeeded if result.output is not None]
+            pack_lines = [f"{result.output}{self._format_pack_size(result.output)}" for result in succeeded if result.output is not None]
             next_step = (
                 "\n\nBước tiếp theo: upload từng file ZIP vào ChatGPT. "
                 "Mở 00_START_HERE.md nếu cần xem hướng dẫn bootstrap."
