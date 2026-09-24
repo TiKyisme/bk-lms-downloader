@@ -70,3 +70,11 @@ def test_long_sync_activity_headline_is_compact_but_keeps_meaningful_ends():
     assert "…" in compact
     assert len(compact) <= 64
     assert shorten_sync_activity("Đang tải: lecture.pdf", limit=64) == "Đang tải: lecture.pdf"
+
+
+def test_pack_size_feedback_is_human_readable(tmp_path):
+    pack = tmp_path / "Course_AI_Study_Pack.zip"
+    pack.write_bytes(b"x" * (1536 * 1024))
+
+    assert App._format_pack_size(pack) == " (1.5 MB)"
+    assert App._format_pack_size(tmp_path / "missing.zip") == ""
