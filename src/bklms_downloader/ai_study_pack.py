@@ -604,7 +604,9 @@ def validate_ai_study_pack(root: Path) -> AIStudyPackValidation:
             represented = record.get("represented_by_source_id")
             decision = record.get("retention_decision")
             valid_equivalent = decision == "OMIT_VERIFIED_DUPLICATE" and represented in source_ids
-            if (not copy_path or not (root / str(copy_path)).is_file()) and not valid_equivalent:
+            valid_markdown = decision == "MARKDOWN_SUFFICIENT" and bool(record.get("output_path")) and (root / str(record.get("output_path"))).is_file()
+            valid_budget = decision in {"OMIT_BINARY_SIZE_BUDGET", "OMIT_VISUAL_BINARY_SIZE_BUDGET"} and bool(record.get("output_path")) and (root / str(record.get("output_path"))).is_file()
+            if (not copy_path or not (root / str(copy_path)).is_file()) and not valid_equivalent and not valid_markdown and not valid_budget:
                 report.errors.append(f"Visual source not retained: {source_path}")
         if record.get("source_type") in VISUAL_SOURCE_TYPES and not chapter_numbers(record):
             report.warnings.append(f"Lecture source has no chapter assignment: {source_path}")
