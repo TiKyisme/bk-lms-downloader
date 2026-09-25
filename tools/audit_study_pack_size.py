@@ -5,28 +5,38 @@ from __future__ import annotations
 import argparse
 import hashlib
 import zipfile
+import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 
 
 def category(name: str) -> str:
     parts = Path(name).parts
+    if name in {"00_START_HERE.md", "01_COURSE_MAP.md", "02_TUTOR_PROTOCOL.md", "03_SOURCE_INDEX.md", "04_COVERAGE_TRACKER.md", "05_RESUME_STATE.md", "06_EXAM_INDEX.md"}:
+        return "navigation/control"
     if name.startswith("sources/past_exams/"):
-        return "historical exams"
-    if parts and parts[0] == "sources":
-        return "retained original sources"
+        return "Coursewave exam binary"
+    if name.startswith("documents/past_exams/"):
+        return "Coursewave exam Markdown"
+    if parts and parts[0] == "chapters":
+        return "chapters"
     if parts and parts[0] == "documents":
         return "normalized documents"
     if parts and parts[0] == "chunks":
         return "retrieval chunks"
     if parts and parts[0] == "meta":
         return "metadata"
-    if Path(name).suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
-        return "images"
-    return "control/navigation"
+    if parts and parts[0] == "sources":
+        suffix = Path(name).suffix.lower()
+        if suffix == ".pptx": return "lecturer PPTX binary"
+        if suffix == ".pdf": return "lecturer PDF binary"
+        return "other lecturer binary"
+    return "other"
 
 
 def audit(path: Path) -> None:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     files: list[tuple[str, int, bytes | None, int]] = []
     zip_size = path.stat().st_size if path.is_file() else 0
     if path.is_file():

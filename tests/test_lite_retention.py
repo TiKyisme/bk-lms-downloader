@@ -73,6 +73,29 @@ def test_pptx_only_failed_conversion_keeps_original(monkeypatch, tmp_path):
     assert (tmp_path / "sources/deck.pptx").is_file()
 
 
+def test_related_non_equivalent_pdf_does_not_block_independent_pptx_conversion(monkeypatch, tmp_path):
+    (tmp_path / "sources").mkdir(); (tmp_path / "documents").mkdir(); (tmp_path / "meta").mkdir()
+    (tmp_path / "sources/deck.pptx").write_bytes(os.urandom(2 * 1024 * 1024))
+    (tmp_path / "sources/related.pdf").write_bytes(b"pdf")
+    for name in ("deck.md", "related.md"):
+        (tmp_path / "documents" / name).write_text("same candidate content " * 30, encoding="utf-8")
+    left, right = record("deck", "sources/deck.pptx", "documents/deck.md"), record("related", "sources/related.pdf", "documents/related.md")
+    monkeypatch.setattr(lite, "verify_pptx_pdf", lambda *_: lite.EquivalenceResult("NOT_EQUIVALENT", reason="changed"))
+    def convert(_source, destination):
+        destination.write_bytes(b"converted")
+        return lite.EquivalenceResult("FULL_EQUIVALENCE", 4, 4, 4, 1, 2, "verified")
+    monkeypatch.setattr(lite, "verify_pptx_only_conversion", convert)
+    decisions = lite.optimize_workspace(tmp_path, [left, right])
+    assert any(item["decision"] == "REPLACE_WITH_VERIFIED_PDF" for item in decisions)
+    assert left.source_copy_path == "sources/deck.pdf"
+    assert (tmp_path / "sources/related.pdf").is_file()
+
+
+def test_pdf_visual_analysis_fails_closed_for_missing_file(tmp_path):
+    result = lite.analyze_pdf_visual(tmp_path / "missing.pdf")
+    assert result["verdict"] == "UNCERTAIN"
+
+
 def test_existing_phase_one_decisions_survive_conservative_phase_two(tmp_path):
     (tmp_path / "sources").mkdir(); (tmp_path / "documents").mkdir(); (tmp_path / "meta").mkdir()
     (tmp_path / "meta/lite_retention.json").write_text(json.dumps({"sources":[{"source_id":"old","decision":"OMIT_VERIFIED_DUPLICATE","represented_by":"kept"}]}),encoding="utf-8")

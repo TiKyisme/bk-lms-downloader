@@ -24,6 +24,8 @@ from .zip_safety import safe_extract_zip
 
 PACK_SCHEMA_VERSION = 1
 PROCESSING_FINGERPRINT = "bklms-study-pack-v1.3"
+MAX_RETAINED_EXAMS = 4
+MAX_EXAM_BINARY_BYTES = 15 * 1024 * 1024
 SKIP_DIRS = {"AI_Knowledge", ".git", "__MACOSX", "node_modules"}
 INTERNAL_METADATA_SOURCE_PATHS = {
     "_meta/course_structure.json",
@@ -307,12 +309,39 @@ class CoursewaveEnricher:
                         exam_variant=candidate.exam_variant,
                     )
                 )
+            result.exams, skipped = self._select_exam_assets(result.exams)
+            result.warnings.extend(skipped)
             result.stage = "completed"
         except Exception as exc:
             result.match = result.match or CourseMatch("fetch_failed", "low", "Không thể đọc danh mục HCMUT Coursewave.")
             result.warnings.append(f"Không thể bổ sung Coursewave: {type(exc).__name__}")
             result.stage = "fetch_failed"
         return result
+
+    @staticmethod
+    def _select_exam_assets(exams: list[ExamAsset]) -> tuple[list[ExamAsset], list[str]]:
+        """Keep a small balanced, evidence-ranked historical exam set."""
+        def rank(item: ExamAsset) -> tuple[int, int, int, int]:
+            variant = 0 if item.exam_variant == "official" else (1 if item.exam_variant == "sample" else 2)
+            term = int("".join(char for char in item.term if char.isdigit()) or 0)
+            extracted = 0 if item.extraction_status == "text_extracted" else 1
+            size = Path(item.cache_path).stat().st_size if Path(item.cache_path).is_file() else MAX_EXAM_BINARY_BYTES
+            return variant, -term, extracted, size
+        selected: list[ExamAsset] = []
+        skipped: list[str] = []
+        used_bytes = 0
+        for exam_type in ("midterm", "final"):
+            candidates = sorted((item for item in exams if item.exam_type == exam_type), key=rank)
+            for item in candidates[:2]:
+                size = Path(item.cache_path).stat().st_size if Path(item.cache_path).is_file() else MAX_EXAM_BINARY_BYTES
+                if len(selected) >= MAX_RETAINED_EXAMS or used_bytes + size > MAX_EXAM_BINARY_BYTES:
+                    skipped.append(f"Bỏ qua đề {item.original_name}: vượt ngân sách đề thi.")
+                    continue
+                selected.append(item); used_bytes += size
+        for item in exams:
+            if item not in selected:
+                skipped.append(f"Không giữ đề {item.original_name}: vượt giới hạn đại diện.")
+        return selected, skipped
 
 
 class StudyPackRefresher:

@@ -5,6 +5,7 @@ import io
 import json
 import re
 import tempfile
+import zipfile
 import zlib
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -16,6 +17,11 @@ from pptx import Presentation
 MIN_PPTX_PDF_SAVING_BYTES = 1024 * 1024
 MIN_PPTX_PDF_SAVING_RATIO = 0.10
 MIN_PPTX_SOURCE_BYTES = 1024 * 1024
+TARGET_PACK_BYTES = 95_000_000
+HARD_PACK_BYTES = 100_000_000
+PDF_TEXT_PAGE_MIN_CHARS = 200
+PDF_LOW_TEXT_CHARS = 80
+PDF_MAX_DRAWINGS_PER_PAGE = 20
 
 
 @dataclass(frozen=True)
@@ -130,6 +136,38 @@ def _text_similarity(left: Path, right: Path) -> float:
     return len(a & b) / max(1, len(a | b))
 
 
+def _workspace_zip_size(root: Path) -> int:
+    with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as handle:
+        temporary = Path(handle.name)
+    try:
+        with zipfile.ZipFile(temporary, "w", zipfile.ZIP_DEFLATED) as archive:
+            for path in sorted(item for item in root.rglob("*") if item.is_file()):
+                archive.write(path, path.relative_to(root).as_posix())
+        return temporary.stat().st_size
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def analyze_pdf_visual(path: Path) -> dict:
+    """Fail-closed page-level evidence for lecturer PDF retention."""
+    try:
+        with fitz.open(path) as document:
+            text_dominant = low_text = zero_text = image_pages = drawing_pages = 0
+            for number, page in enumerate(document, 1):
+                text_chars = len(page.get_text().strip())
+                if text_chars >= PDF_TEXT_PAGE_MIN_CHARS: text_dominant += 1
+                if text_chars < PDF_LOW_TEXT_CHARS: low_text += 1
+                if not text_chars: zero_text += 1
+                has_images = bool(page.get_images(full=True)); has_drawings = len(page.get_drawings()) > PDF_MAX_DRAWINGS_PER_PAGE
+                if has_images: image_pages += 1
+                if has_drawings: drawing_pages += 1
+            pages = len(document)
+        verdict = "TEXT_DOMINANT" if pages and text_dominant == pages and not low_text and not image_pages and not drawing_pages else "VISUAL_REQUIRED"
+        return {"page_count": pages, "text_dominant_pages": text_dominant, "zero_text_pages": zero_text, "low_text_pages": low_text, "image_heavy_pages": image_pages, "drawing_heavy_pages": drawing_pages, "verdict": verdict}
+    except Exception as exc:
+        return {"page_count": 0, "verdict": "UNCERTAIN", "error": type(exc).__name__}
+
+
 def optimize_workspace(root: Path, records: list) -> list[dict]:
     """Remove only verified full duplicates; every failure keeps both binaries."""
     retention_path = root / "meta" / "lite_retention.json"
@@ -153,6 +191,7 @@ def optimize_workspace(root: Path, records: list) -> list[dict]:
                 candidates.append((similarity, left, right))
     decisions = [item for item in existing if isinstance(item, dict)]
     used = set()
+    full_equivalent_pptx = set()
     for similarity, left, right in sorted(candidates, key=lambda item: item[0], reverse=True):
         if left.source_id in used or right.source_id in used:
             continue
@@ -171,8 +210,11 @@ def optimize_workspace(root: Path, records: list) -> list[dict]:
         omitted.represented_by_source_id = retained.source_id
         omitted.retention_decision = "OMIT_VERIFIED_DUPLICATE"
         omitted_path.unlink()
+        full_equivalent_pptx.add(left.source_id)
         used.update((left.source_id, right.source_id))
-    related_pptx = {left.source_id for _similarity, left, _right in candidates}
+    # A merely related PDF is not proof that the PPTX is represented. Only a
+    # verified full-equivalence pair is ineligible for its own conversion.
+    related_pptx = full_equivalent_pptx
     for record in records:
         copy_path = getattr(record, "source_copy_path", None)
         if not copy_path or record.source_id in related_pptx or Path(copy_path).suffix.lower() != ".pptx":
@@ -192,6 +234,38 @@ def optimize_workspace(root: Path, records: list) -> list[dict]:
         record.source_copy_path = retained.relative_to(root).as_posix()
         record.retention_decision = "REPLACE_WITH_VERIFIED_PDF"
         decisions.append({"source_id": record.source_id, "decision": "REPLACE_WITH_VERIFIED_PDF", "original_format": "pptx", "retained_format": "pdf", "original_slide_count": evidence.left_count, "retained_page_count": evidence.right_count, "original_zip_cost": original_cost, "retained_zip_cost": retained_cost, "saving_bytes": saving, "verification": asdict(evidence)})
+    for record in records:
+        copy_path = getattr(record, "source_copy_path", None)
+        if not copy_path or Path(copy_path).suffix.lower() != ".pdf" or getattr(record, "source_type", "") != "lecture_pdf":
+            continue
+        original = root / copy_path
+        original_cost = len(zlib.compress(original.read_bytes(), 9))
+        analysis = analyze_pdf_visual(root / copy_path)
+        if not getattr(record, "output_path", None) or not (root / record.output_path).is_file():
+            continue
+        original_cost = len(zlib.compress(original.read_bytes(), 9))
+        if analysis.get("verdict") == "TEXT_DOMINANT":
+            original.unlink(); record.source_copy_path = None; record.retention_decision = "MARKDOWN_SUFFICIENT"
+            decisions.append({"source_id": record.source_id, "decision": "MARKDOWN_SUFFICIENT", "original_format": "pdf", "original_zip_cost": original_cost, "normalized_document": record.output_path, "analysis": analysis})
+    # Final compact pass: remove only copied lecturer binaries whose normalized
+    # document remains. This is budget pressure, never visual evidence proof.
+    projected_size = _workspace_zip_size(root)
+    if projected_size > TARGET_PACK_BYTES:
+        removable = []
+        for record in records:
+            copy_path = getattr(record, "source_copy_path", None)
+            if not copy_path or getattr(record, "source_type", "") not in {"lecture_pdf", "slide"} or not getattr(record, "output_path", None):
+                continue
+            binary = root / copy_path; document = root / record.output_path
+            if binary.is_file() and document.is_file(): removable.append((len(zlib.compress(binary.read_bytes(), 9)), record, binary))
+        for _cost, record, binary in sorted(removable, reverse=True, key=lambda item: item[0]):
+            if projected_size <= TARGET_PACK_BYTES: break
+            analysis = analyze_pdf_visual(binary) if binary.suffix.lower() == ".pdf" else {"verdict": "VISUAL_REQUIRED"}
+            decision = "OMIT_BINARY_SIZE_BUDGET" if analysis.get("verdict") == "TEXT_DOMINANT" else "OMIT_VISUAL_BINARY_SIZE_BUDGET"
+            binary.unlink()
+            projected_size -= _cost
+            record.source_copy_path = None; record.retention_decision = decision
+            decisions.append({"source_id": record.source_id, "decision": decision, "original_format": binary.suffix.lower().lstrip("."), "original_zip_cost": _cost, "normalized_document": record.output_path, "reason": "pack_size_budget", "analysis": analysis})
     (root / "meta").mkdir(exist_ok=True)
     retention_path.write_text(json.dumps({"retention_mode": "lite-v1", "sources": decisions}, indent=2), encoding="utf-8")
     return decisions
