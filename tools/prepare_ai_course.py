@@ -793,6 +793,31 @@ class CoursePreparer:
 
         self.course_name = getattr(args, "course_name", source_root.name)
 
+    def _emit_progress(
+        self,
+        phase: str,
+        course_fraction: float,
+        message: str = "",
+        *,
+        completed: int | None = None,
+        total: int | None = None,
+    ) -> None:
+        callback = getattr(self.args, "progress_callback", None)
+        if callback is None:
+            return
+        try:
+            callback(
+                {
+                    "phase": phase,
+                    "course_fraction": course_fraction,
+                    "message": message,
+                    "completed": completed,
+                    "total": total,
+                }
+            )
+        except Exception:
+            pass
+
     def load_reused(self, reusable_source_paths: set[str]) -> None:
         """Load compatible derived records copied from an existing pack workspace."""
         documents_path = self.meta_dir / "documents.jsonl"
@@ -1206,8 +1231,16 @@ class CoursePreparer:
     def process(self, files: Optional[list[Path]] = None) -> None:
         self.check_cancelled()
         files = files if files is not None else iter_source_files(self.source_root)
+        total_files = len(files)
         print(f"[2/6] Source root: {self.source_root}")
         print(f"      Phát hiện {len(files)} file")
+        self._emit_progress(
+            "source_discovery",
+            0.15,
+            f"Đã phát hiện {total_files} tài liệu.",
+            completed=0,
+            total=total_files,
+        )
 
         # Canonical order: content.txt trước HTML để dedup chính xác hơn.
         def order_key(p: Path):
@@ -1240,6 +1273,13 @@ class CoursePreparer:
             # Downloader metadata copy.
             if ext in JSON_EXTS:
                 self.process_json_metadata(path)
+                self._emit_progress(
+                    "source_processing",
+                    0.15 + 0.60 * idx / max(1, total_files),
+                    f"Đang xử lý tài liệu {idx}/{total_files}...",
+                    completed=idx,
+                    total=total_files,
+                )
                 continue
 
             # Ignore generated helper text from old downloader if obviously empty/noisy.
@@ -1280,15 +1320,25 @@ class CoursePreparer:
                         note=str(exc),
                     )
                 )
+            self._emit_progress(
+                "source_processing",
+                0.15 + 0.60 * idx / max(1, total_files),
+                f"Đang xử lý tài liệu {idx}/{total_files}...",
+                completed=idx,
+                total=total_files,
+            )
 
         print("[3/6] Tối ưu biểu diễn trùng lặp an toàn...")
+        self._emit_progress("retention", 0.78, "Đang tối ưu AI Study Pack...")
         try:
             optimize_workspace(self.output_root, self.records)
         except Exception:
             pass
+        self._emit_progress("retention_complete", 0.82, "Đã hoàn tất tối ưu AI Study Pack.")
         print("[3/6] Sinh manifests/chunks...")
         self.check_cancelled()
         self.write_manifests()
+        self._emit_progress("manifest", 0.87, "Đã sinh metadata và corpus.")
         print("[4/6] Sinh tutor navigation...")
         self.check_cancelled()
         self.write_study_pack_outputs()
@@ -1353,14 +1403,17 @@ class CoursePreparer:
             records,
             [asdict(chunk) for chunk in self.chunks],
         )
+        self._emit_progress("validation", 0.92, "Đang kiểm tra Study Pack...")
         validation = validate_ai_study_pack(self.output_root)
         if validation.errors:
             raise RuntimeError("AI Study Pack validation failed: " + "; ".join(validation.errors))
+        self._emit_progress("archive", 0.95, "Đang đóng gói và kiểm tra ZIP...")
         self.study_pack_path = create_chatgpt_study_pack(
             self.output_root,
             self.course_name,
             self.archive_destination,
         )
+        self._emit_progress("archive_complete", 0.98, "Đã tạo ZIP AI Study Pack.")
 
 
 # -----------------------------------------------------------------------------

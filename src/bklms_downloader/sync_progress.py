@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 
+ACTIVE_COURSE_MAX = 0.98
+
+
 def clamp_progress(value: float | int | None) -> float:
     """Return a finite progress value in the inclusive ``0..1`` range."""
     try:
@@ -12,6 +15,11 @@ def clamp_progress(value: float | int | None) -> float:
     if numeric != numeric:  # NaN
         return 0.0
     return max(0.0, min(1.0, numeric))
+
+
+def cap_active_course_fraction(value: float | int | None) -> float:
+    """Keep an active course below its completion boundary."""
+    return min(ACTIVE_COURSE_MAX, clamp_progress(value))
 
 
 def course_activity_fraction(

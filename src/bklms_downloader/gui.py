@@ -35,6 +35,7 @@ from .platform_support import open_in_file_manager
 from .scroll_routing import WheelBindingRegistry, choose_scroll_route, RoutedScrollableFrame
 from .sync_manager import SyncManager
 from .sync_progress import (
+    cap_active_course_fraction,
     advance_displayed_progress,
     clamp_progress,
     course_activity_fraction,
@@ -823,6 +824,10 @@ class App(ctk.CTk):
         self.displayed_progress = 0.0
         self.target_progress = 0.0
         self._progress_animation_scheduled = False
+        self._progress_total_courses = 0
+        self._progress_completed_courses = 0
+        self._progress_current_course_index = 0
+        self._progress_current_course_fraction = 0.0
         self._sync_completed_courses = 0
         self._sync_total_courses = 0
         self._sync_course_index = 0
@@ -1791,8 +1796,15 @@ class App(ctk.CTk):
 
         self.sync_cancel_event = threading.Event()
         self._set_busy(True)
+        self._progress_total_courses = len(courses)
+        self._progress_completed_courses = 0
+        self._progress_current_course_index = 0
+        self._progress_current_course_fraction = 0.0
+        self._sync_total_courses = len(courses)
+        self._sync_completed_courses = 0
+        self._sync_current_course_fraction = 0.0
         self._reset_progress_state()
-        self.overall_var.set(f"0 / {len(courses)} course")
+        self._update_progress_label()
         self.current_course_var.set("Đang chuẩn bị cho AI...")
         self._set_summary_message("Đang xử lý tài liệu đã tải...")
         self._log(f"[AI] Bắt đầu chuẩn bị {len(courses)} course.")
@@ -1982,6 +1994,10 @@ class App(ctk.CTk):
         self.sync_elapsed_var.set("Đã chạy 0:00")
         self._set_busy(True)
         self.progress_total = len(courses)
+        self._progress_total_courses = len(courses)
+        self._progress_completed_courses = 0
+        self._progress_current_course_index = 0
+        self._progress_current_course_fraction = 0.0
         self._sync_total_courses = len(courses)
         self._sync_completed_courses = 0
         self._sync_course_index = 0
@@ -2044,6 +2060,40 @@ class App(ctk.CTk):
         self.target_progress = progress
         self._progress_animation_scheduled = False
         self.progress.set(progress)
+        self._update_progress_label()
+
+    def _update_progress_label(self) -> None:
+        """Keep the text percentage aligned with the animated bar position."""
+        total = self.__dict__.get("_progress_total_courses", 0)
+        completed = self.__dict__.get("_progress_completed_courses", 0)
+        displayed = self.__dict__.get("displayed_progress", 0.0)
+        overall_var = self.__dict__.get("overall_var")
+        if overall_var is not None:
+            overall_var.set(format_overall_progress(displayed, completed, total))
+
+    def _set_batch_progress_target(
+        self,
+        current_course_fraction: float,
+        *,
+        completed_courses: int | None = None,
+        terminal: bool = False,
+    ) -> None:
+        total = self.__dict__.get("_progress_total_courses", 0)
+        if completed_courses is not None:
+            self._progress_completed_courses = max(0, min(total, completed_courses))
+        fraction = clamp_progress(current_course_fraction) if terminal else cap_active_course_fraction(current_course_fraction)
+        self._progress_current_course_fraction = fraction
+        target = overall_progress(
+            self.__dict__.get("_progress_completed_courses", 0),
+            total,
+            fraction,
+        )
+        self.target_progress = max(
+            clamp_progress(self.__dict__.get("target_progress", 0.0)),
+            target,
+        )
+        self._update_progress_label()
+        self._schedule_progress_animation()
 
     def _schedule_progress_animation(self) -> None:
         if self.__dict__.get("_destroyed", False):
@@ -2066,6 +2116,7 @@ class App(ctk.CTk):
         next_progress = advance_displayed_progress(displayed, target)
         self.displayed_progress = next_progress
         self.progress.set(next_progress)
+        self._update_progress_label()
         if next_progress < clamp_progress(target):
             self._schedule_progress_animation()
 
@@ -2074,24 +2125,18 @@ class App(ctk.CTk):
         current_course_fraction: float,
         *,
         completed_courses: int | None = None,
+        terminal: bool = False,
     ) -> None:
         total = self.__dict__.get("_sync_total_courses", 0)
-        completed = (
-            self.__dict__.get("_sync_completed_courses", 0)
-            if completed_courses is None
-            else completed_courses
+        self._progress_total_courses = total
+        if completed_courses is None:
+            completed_courses = self.__dict__.get("_sync_completed_courses", 0)
+        self._progress_completed_courses = max(0, min(total, completed_courses))
+        self._set_batch_progress_target(
+            current_course_fraction,
+            completed_courses=self._progress_completed_courses,
+            terminal=terminal,
         )
-        target = overall_progress(completed, total, current_course_fraction)
-        current_target = self.__dict__.get("target_progress", 0.0)
-        self.target_progress = max(clamp_progress(current_target), target)
-        self.overall_var.set(
-            format_overall_progress(
-                self.target_progress,
-                completed,
-                total,
-            )
-        )
-        self._schedule_progress_animation()
 
     def _handle_sync_activity_progress(self, activity: dict) -> None:
         activity_total = activity.get("activity_total")
@@ -2108,6 +2153,7 @@ class App(ctk.CTk):
             bytes_total=activity.get("bytes_total"),
             completed=completed,
         )
+        fraction = cap_active_course_fraction(fraction)
         self._sync_current_course_fraction = max(
             self.__dict__.get("_sync_current_course_fraction", 0.0),
             fraction,
@@ -2224,16 +2270,46 @@ class App(ctk.CTk):
         elif kind == "ai_prepare_course_start":
             course: Course = event["course"]
             index, total = event["index"], event["total"]
+            self._progress_total_courses = total
+            self._progress_current_course_index = index
+            self._progress_current_course_fraction = 0.0
+            self._sync_total_courses = total
+            self._sync_course_index = index
+            self._sync_current_course_fraction = 0.0
             self.current_course_var.set(
-                f"Đang chuẩn bị cho AI: {course.code or '-'} — {course.display_name}"
+                f"Đang chuẩn bị course {index}/{total} cho AI: "
+                f"{course.code or '-'} — {course.display_name}"
             )
-            self.overall_var.set(f"{index} / {total} course")
-            self.progress.set((index - 1) / max(1, total))
+            self._set_batch_progress_target(
+                0.0,
+                completed_courses=self.__dict__.get("_progress_completed_courses", 0),
+            )
             self._log(f"[AI] {course.code or '-'} - {course.display_name}")
+        elif kind == "ai_prepare_progress":
+            course: Course = event["course"]
+            fraction = event.get("course_fraction", 0.0)
+            self._progress_current_course_fraction = max(
+                self.__dict__.get("_progress_current_course_fraction", 0.0),
+                cap_active_course_fraction(fraction),
+            )
+            self._set_batch_progress_target(
+                self._progress_current_course_fraction,
+                completed_courses=self.__dict__.get("_progress_completed_courses", 0),
+            )
+            message = event.get("message") or event.get("phase", "Đang xử lý AI Study Pack...")
+            self.current_course_var.set(f"{course.code or '-'} — {message}")
         elif kind == "ai_prepare_course_complete":
             result = event["result"]
-            self.progress.set(event["index"] / max(1, event["total"]))
             if result.succeeded:
+                self._progress_completed_courses = min(
+                    self.__dict__.get("_progress_total_courses", event["total"]),
+                    self.__dict__.get("_progress_completed_courses", 0) + 1,
+                )
+                self._progress_current_course_fraction = 0.0
+                self._set_batch_progress_target(
+                    0.0,
+                    completed_courses=self._progress_completed_courses,
+                )
                 action = "cập nhật lại" if result.refresh_state in {"dirty", "legacy"} else "đã sẵn sàng"
                 self._log(f"[AI][DONE] {result.course.display_name} — {action}{self._format_pack_size(result.output)}")
                 for warning in result.warnings:
@@ -2277,10 +2353,10 @@ class App(ctk.CTk):
             index, total = event["index"], event["total"]
             self._sync_total_courses = total
             self._sync_course_index = index
-            self._sync_completed_courses = max(
-                self.__dict__.get("_sync_completed_courses", 0),
-                index - 1,
-            )
+            self._progress_total_courses = total
+            self._sync_completed_courses = self.__dict__.get("_sync_completed_courses", 0)
+            self._progress_completed_courses = self._sync_completed_courses
+            self._progress_current_course_index = index
             self._sync_activity_total = 0
             self._sync_current_activity_index = 0
             self._sync_current_course_fraction = 0.0
@@ -2301,13 +2377,14 @@ class App(ctk.CTk):
         elif kind == "course_sync_complete":
             result = event["result"]
             index, total = event["index"], event["total"]
-            if result.status != "cancelled":
-                self._sync_completed_courses = max(
-                    self.__dict__.get("_sync_completed_courses", 0),
-                    index,
+            if result.status in {"success", "up_to_date"}:
+                self._sync_completed_courses = min(
+                    total,
+                    self.__dict__.get("_sync_completed_courses", 0) + 1,
                 )
-                self._sync_current_course_fraction = 1.0
-                self._set_sync_progress_target(1.0)
+                self._progress_completed_courses = self._sync_completed_courses
+                self._sync_current_course_fraction = 0.0
+                self._set_sync_progress_target(0.0)
             self._refresh_course_row(result.course_id)
             if result.status == "cancelled":
                 self._log(f"[CANCEL] {result.name} — giữ {result.downloaded} file đã tải")
@@ -2334,11 +2411,16 @@ class App(ctk.CTk):
     def _complete_ai_batch(self, batch: AIBatchPreparationResult) -> None:
         self._finish_sync_activity()
         self._set_busy(False)
-        total = len(batch.results)
+        total = self.__dict__.get("_progress_total_courses", len(batch.results))
         succeeded = batch.succeeded
         failed = batch.failed
-        self.progress.set(1 if total else 0)
-        self.overall_var.set(f"{total} / {total} course")
+        self._progress_completed_courses = min(total, len(succeeded))
+        fully_successful = bool(total) and not batch.cancelled and not failed and len(succeeded) == total
+        self._set_batch_progress_target(
+            0.0,
+            completed_courses=self._progress_completed_courses,
+            terminal=fully_successful,
+        )
         self.current_course_var.set("Sẵn sàng đồng bộ")
         self._set_summary_message(
             f"AI: {len(succeeded)} course thành công • {len(failed)} course thất bại"
@@ -2448,24 +2530,22 @@ class App(ctk.CTk):
         self._finish_sync_activity()
         self._set_busy(False)
         completed_courses = sum(
-            result.status != "cancelled" for result in batch.results
+            result.status in {"success", "up_to_date"}
+            for result in batch.results
         )
         self._sync_total_courses = total
         self._sync_completed_courses = max(
             self.__dict__.get("_sync_completed_courses", 0),
             completed_courses,
         )
-        if not batch.cancelled and total and completed_courses >= total:
-            final_target = 1.0
-        else:
-            final_target = overall_progress(
-                self._sync_completed_courses,
-                total,
-                0.0,
-            )
+        self._progress_total_courses = total
+        self._progress_completed_courses = self._sync_completed_courses
+        fully_successful = bool(total) and not batch.cancelled and not batch.errors and not batch.authentication_error and self._sync_completed_courses >= total
+        self._sync_current_course_fraction = 0.0
         self._set_sync_progress_target(
-            1.0 if final_target >= 1.0 else 0.0,
+            0.0,
             completed_courses=self._sync_completed_courses,
+            terminal=fully_successful,
         )
         self._refresh_courses()
         if self.__dict__.get("_close_requested", False):
