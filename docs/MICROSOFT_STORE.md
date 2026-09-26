@@ -4,17 +4,20 @@ The application uses semantic `MAJOR.MINOR.PATCH` versions. Microsoft Store
 MSIX identity versions must use four numeric components and this project's
 revision component must always remain `0`.
 
-Current public release:
+Current public GitHub release:
 
 ```text
-Application / Git tag: 1.4.0 / v1.4.0
-Microsoft Store MSIX:  1.4.0.0
+Application / Git tag: 1.5.0 / v1.5.0
 ```
 
-Next release candidate:
+Microsoft Store status:
+
+The v1.5.0 Store update has not yet been submitted. Microsoft Store may still
+display the previously approved version.
+
+Next Microsoft Store submission target:
 
 ```text
-Application / future Git tag: 1.5.0 / v1.5.0
 Microsoft Store MSIX:       1.5.0.0
 ```
 
