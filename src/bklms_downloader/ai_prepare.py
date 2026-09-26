@@ -298,6 +298,7 @@ class AICoursePreparer:
         coursewave_enricher: CoursewaveEnricher | None = None,
         choose_coursewave_candidate=None,
         coursewave_progress: Callable[[str], None] | None = None,
+        progress_callback: Callable[[dict], None] | None = None,
         cancel_event=None,
     ) -> Path:
         missing = missing_ai_dependencies(self.dependency_importer)
@@ -317,6 +318,20 @@ class AICoursePreparer:
         if not self.script_path.is_file():
             raise AIPreparationError("Không tìm thấy thành phần chuẩn bị AI trong ứng dụng.")
 
+        def report(phase: str, course_fraction: float, message: str = "", **payload) -> None:
+            if progress_callback is None:
+                return
+            event = {
+                "phase": phase,
+                "course_fraction": course_fraction,
+                "message": message,
+                **payload,
+            }
+            try:
+                progress_callback(event)
+            except Exception:
+                pass
+
         owned_pack = Path(existing_pack).expanduser().resolve() if existing_pack else None
         if owned_pack is not None and not owned_pack.is_file():
             owned_pack = None
@@ -324,17 +339,32 @@ class AICoursePreparer:
             owned_pack = self._find_owned_pack(destination, course_name or source_root.name)
         refresh_plan = plan_refresh(owned_pack, source_root)
         self.last_refresh_state = refresh_plan.state
+        report(
+            "planning",
+            0.04,
+            "Đang lập kế hoạch cập nhật Study Pack...",
+            refresh_state=refresh_plan.state,
+        )
         enrichment = None
         if enrich_exams:
+            def report_coursewave(message: str) -> None:
+                report("coursewave", 0.06, message)
+                if coursewave_progress is not None:
+                    coursewave_progress(message)
+
             enrichment = (coursewave_enricher or CoursewaveEnricher()).enrich(
                 course_code=course_code,
                 course_name=course_name or source_root.name,
                 cancel_event=cancel_event,
                 choose_candidate=choose_coursewave_candidate,
-                progress_callback=coursewave_progress,
+                progress_callback=report_coursewave,
             )
+            report("coursewave_complete", 0.15, "Đã kiểm tra Coursewave.")
+        else:
+            report("coursewave_skipped", 0.15, "Coursewave không được bật.")
         self.last_enrichment_warnings = tuple(enrichment.warnings) if enrichment else ()
         if refresh_plan.state == "up_to_date" and owned_pack is not None and not enrich_exams:
+            report("validation", 0.98, "Đang kiểm tra Study Pack đã sẵn sàng.")
             return owned_pack
 
         try:
@@ -355,8 +385,10 @@ class AICoursePreparer:
                                 cancel_event,
                                 existing_pack=owned_pack if refresh_plan.state == "dirty" else None,
                                 refresh_plan=refresh_plan,
+                                progress_callback=progress_callback,
                             )
                         )
+                    report("pipeline_complete", 0.95, "Đã hoàn tất sinh nội dung Study Pack.")
                     output_path = self._finalize_refresh(
                         candidate=output_path,
                         existing_pack=owned_pack,
@@ -369,6 +401,7 @@ class AICoursePreparer:
                         cancel_event=cancel_event,
                     )
             else:
+                report("validation", 0.96, "Đang kiểm tra Study Pack đã sẵn sàng.")
                 output_path = self._finalize_refresh(
                     candidate=owned_pack,
                     existing_pack=owned_pack,
@@ -380,6 +413,7 @@ class AICoursePreparer:
                     enrichment=enrichment,
                     cancel_event=cancel_event,
                 )
+            report("finalization", 0.98, "Đã hoàn tất kiểm tra và đóng gói ZIP.")
         except AIPreparationCancelled:
             raise
         except AIPreparationError:
@@ -454,6 +488,7 @@ def _pipeline_arguments(
     *,
     existing_pack: Path | None = None,
     refresh_plan=None,
+    progress_callback: Callable[[dict], None] | None = None,
 ) -> SimpleNamespace:
     """Keep GUI preparation local and deterministic: no transcription or cloud."""
     return SimpleNamespace(
@@ -462,6 +497,7 @@ def _pipeline_arguments(
         archive_destination=destination,
         course_name=course_name,
         cancel_event=cancel_event,
+        progress_callback=progress_callback,
         incremental_existing_pack=existing_pack,
         incremental_reuse_paths=tuple(getattr(refresh_plan, "reused_sources", ())),
         incremental_stale_paths=tuple(
@@ -560,6 +596,14 @@ class AIBatchPreparer:
                                 message=message,
                             )
                         ) if enrich_exams else None,
+                        progress_callback=(
+                            lambda progress: self._emit(
+                                progress_callback,
+                                "ai_prepare_progress",
+                                course=course,
+                                **progress,
+                            )
+                        ),
                         cancel_event=cancel_event,
                     )
                 except TypeError as exc:
