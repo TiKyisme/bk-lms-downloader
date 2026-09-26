@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.5.1 - 2026-09-26
+
+### Fixed
+
+- Fix synchronization progress reaching 100% before the full batch completed.
+- Prevent completed-course progress from being double-counted.
+- Add granular AI Study Pack preparation progress instead of course-boundary
+  jumps.
+- Keep completed-course counts separate from the currently active course.
+- Keep active sync/AI work below 100% until true terminal completion.
+- Ensure cancellation and error states never falsely display full completion.
+
 ## 1.5.0 - 2026-09-26
 
 ### Added / Improved
