@@ -154,10 +154,10 @@ security, packaging, Store-versioning, Chrome, and AI Study Pack guidance.
 
 ## Trạng thái phát hành
 
-**v1.4.0** đã phát hành trên [GitHub Releases](https://github.com/TiKyisme/bk-lms-downloader/releases/latest).
+**v1.5.0** đã phát hành trên [GitHub Releases](https://github.com/TiKyisme/bk-lms-downloader/releases/latest).
 AI Study Pack hiện có thể giảm các biểu diễn trình chiếu trùng lặp khi equivalence
 được kiểm chứng cục bộ; mức giảm tùy theo từng course. Bản cập nhật Microsoft
-Store v1.4.0 có thể được phát hành sau GitHub;
+Store v1.5.0 có thể được phát hành sau GitHub;
 Store có thể vẫn hiển thị bản đã được duyệt trước đó trong thời gian này.
 
 ## CLI (advanced)

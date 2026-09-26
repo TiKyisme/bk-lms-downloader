@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.5.0 - 2026-09-26
+
+### Added / Improved
+
+- Add smooth granular synchronization progress with activity-level work and
+  known-size download progress instead of course-boundary jumps.
+- Add safe AI Study Pack size budgeting when removable lecturer binaries make
+  a large pack exceed the configured target.
+- Retain representative Coursewave exams with caps of 2 Midterm, 2 Final, 4
+  total, and a 15 MiB binary budget.
+- Improve PPTX/PDF representation handling and independent verified
+  PPTX-to-PDF conversion.
+
+### Validation
+
+Release validation covered GE1013 visual-heavy/large material, Computer
+Networks medium packs, CO2013 mixed/database material with Coursewave exams,
+CO3001 slide/PPTX-heavy material, and SP1039 large raw/text-heavy material.
+
 ## 1.4.0 - 2026-09-24
 
 - Add safe local AI Study Pack Lite optimization: verified duplicate
