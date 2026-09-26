@@ -1,5 +1,5 @@
 beautifulsoup4>=4.12,<5
-markdownify>=0.13,<1
+markdownify>=0.13,<2
 pymupdf>=1.24,<2
 python-pptx>=1.0,<2
 pywin32>=306,<312; platform_system == 'Windows'
