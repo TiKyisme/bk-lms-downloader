@@ -34,6 +34,13 @@ from .onboarding import OnboardingDialog
 from .platform_support import open_in_file_manager
 from .scroll_routing import WheelBindingRegistry, choose_scroll_route, RoutedScrollableFrame
 from .sync_manager import SyncManager
+from .sync_progress import (
+    advance_displayed_progress,
+    clamp_progress,
+    course_activity_fraction,
+    format_overall_progress,
+    overall_progress,
+)
 from .ui_icons import icon
 from .ui_theme import THEME
 from .update_checker import UpdateChecker, UpdateInfo
@@ -813,6 +820,15 @@ class App(ctk.CTk):
         self.current_course_id: str | None = None
         self.course_rows: dict[str, CourseRow] = {}
         self.progress_total = 1
+        self.displayed_progress = 0.0
+        self.target_progress = 0.0
+        self._progress_animation_scheduled = False
+        self._sync_completed_courses = 0
+        self._sync_total_courses = 0
+        self._sync_course_index = 0
+        self._sync_activity_total = 0
+        self._sync_current_activity_index = 0
+        self._sync_current_course_fraction = 0.0
         self.icons = self._create_icons()
         self._wheel_bindings = WheelBindingRegistry()
         self._scroll_regions: dict[str, object] = {}
@@ -1775,7 +1791,7 @@ class App(ctk.CTk):
 
         self.sync_cancel_event = threading.Event()
         self._set_busy(True)
-        self.progress.set(0)
+        self._reset_progress_state()
         self.overall_var.set(f"0 / {len(courses)} course")
         self.current_course_var.set("Đang chuẩn bị cho AI...")
         self._set_summary_message("Đang xử lý tài liệu đã tải...")
@@ -1966,8 +1982,14 @@ class App(ctk.CTk):
         self.sync_elapsed_var.set("Đã chạy 0:00")
         self._set_busy(True)
         self.progress_total = len(courses)
-        self.progress.set(0)
-        self.overall_var.set(f"0 / {len(courses)} course")
+        self._sync_total_courses = len(courses)
+        self._sync_completed_courses = 0
+        self._sync_course_index = 0
+        self._sync_activity_total = 0
+        self._sync_current_activity_index = 0
+        self._sync_current_course_fraction = 0.0
+        self._reset_progress_state()
+        self.overall_var.set(format_overall_progress(0.0, 0, len(courses)))
         self.current_course_var.set("Đang kiểm tra phiên đăng nhập...")
         self._set_summary_message("Đang đồng bộ...")
         self._set_login_status("Đang đồng bộ...", "busy")
@@ -2015,6 +2037,82 @@ class App(ctk.CTk):
         self.current_course_var.set("Đang hủy đồng bộ...")
         self._set_summary_message("Đang hủy sau tài nguyên đang mở...")
         self._log("[SYNC] Đã yêu cầu hủy đồng bộ an toàn.")
+
+    def _reset_progress_state(self, value: float = 0.0) -> None:
+        progress = clamp_progress(value)
+        self.displayed_progress = progress
+        self.target_progress = progress
+        self._progress_animation_scheduled = False
+        self.progress.set(progress)
+
+    def _schedule_progress_animation(self) -> None:
+        if self.__dict__.get("_destroyed", False):
+            return
+        if self.__dict__.get("_progress_animation_scheduled", False):
+            return
+        # Lightweight App.__new__ test doubles do not have a Tk interpreter.
+        if "_schedule_ui_callback" not in self.__dict__ and "tk" not in self.__dict__:
+            return
+        self._progress_animation_scheduled = True
+        if not self._schedule_ui_callback(40, self._animate_progress):
+            self._progress_animation_scheduled = False
+
+    def _animate_progress(self) -> None:
+        self._progress_animation_scheduled = False
+        if self.__dict__.get("_destroyed", False):
+            return
+        displayed = self.__dict__.get("displayed_progress", 0.0)
+        target = self.__dict__.get("target_progress", displayed)
+        next_progress = advance_displayed_progress(displayed, target)
+        self.displayed_progress = next_progress
+        self.progress.set(next_progress)
+        if next_progress < clamp_progress(target):
+            self._schedule_progress_animation()
+
+    def _set_sync_progress_target(
+        self,
+        current_course_fraction: float,
+        *,
+        completed_courses: int | None = None,
+    ) -> None:
+        total = self.__dict__.get("_sync_total_courses", 0)
+        completed = (
+            self.__dict__.get("_sync_completed_courses", 0)
+            if completed_courses is None
+            else completed_courses
+        )
+        target = overall_progress(completed, total, current_course_fraction)
+        current_target = self.__dict__.get("target_progress", 0.0)
+        self.target_progress = max(clamp_progress(current_target), target)
+        self.overall_var.set(
+            format_overall_progress(
+                self.target_progress,
+                completed,
+                total,
+            )
+        )
+        self._schedule_progress_animation()
+
+    def _handle_sync_activity_progress(self, activity: dict) -> None:
+        activity_total = activity.get("activity_total")
+        activity_index = activity.get("activity_index")
+        if activity_total is None or activity_index is None:
+            return
+        self._sync_activity_total = activity_total
+        self._sync_current_activity_index = activity_index
+        completed = activity.get("event") == "activity_complete"
+        fraction = course_activity_fraction(
+            activity_index,
+            activity_total,
+            bytes_written=activity.get("bytes_written"),
+            bytes_total=activity.get("bytes_total"),
+            completed=completed,
+        )
+        self._sync_current_course_fraction = max(
+            self.__dict__.get("_sync_current_course_fraction", 0.0),
+            fraction,
+        )
+        self._set_sync_progress_target(self._sync_current_course_fraction)
 
     def _finish_sync_activity(self) -> None:
         self.sync_cancel_event = None
@@ -2177,8 +2275,20 @@ class App(ctk.CTk):
         elif kind == "course_sync_start":
             course: Course = event["course"]
             index, total = event["index"], event["total"]
-            self.overall_var.set(f"{index} / {total} course")
-            self.current_course_var.set(f"Đang đồng bộ: {course.code or '-'} — {course.display_name}")
+            self._sync_total_courses = total
+            self._sync_course_index = index
+            self._sync_completed_courses = max(
+                self.__dict__.get("_sync_completed_courses", 0),
+                index - 1,
+            )
+            self._sync_activity_total = 0
+            self._sync_current_activity_index = 0
+            self._sync_current_course_fraction = 0.0
+            self._set_sync_progress_target(0.0)
+            self.current_course_var.set(
+                f"Đang đồng bộ course {index}/{total}: "
+                f"{course.code or '-'} — {course.display_name}"
+            )
             row = self.course_rows.get(course.id)
             if row is not None:
                 row.set_status("Đang đồng bộ...", THEME.primary)
@@ -2190,7 +2300,14 @@ class App(ctk.CTk):
             self._log("[SYNC] Đang dừng sau tài nguyên hiện tại.")
         elif kind == "course_sync_complete":
             result = event["result"]
-            self.progress.set(min(1, event["index"] / max(1, event["total"])))
+            index, total = event["index"], event["total"]
+            if result.status != "cancelled":
+                self._sync_completed_courses = max(
+                    self.__dict__.get("_sync_completed_courses", 0),
+                    index,
+                )
+                self._sync_current_course_fraction = 1.0
+                self._set_sync_progress_target(1.0)
             self._refresh_course_row(result.course_id)
             if result.status == "cancelled":
                 self._log(f"[CANCEL] {result.name} — giữ {result.downloaded} file đã tải")
@@ -2295,6 +2412,12 @@ class App(ctk.CTk):
     def _handle_crawler_event(self, activity: dict) -> None:
         kind = activity.get("event")
         message = activity.get("message", "")
+        if kind == "course_structure_discovered":
+            self._sync_activity_total = activity.get("activity_total") or 0
+            self._sync_current_activity_index = 0
+            return
+        if kind in {"activity_processing", "activity_complete", "download_progress"}:
+            self._handle_sync_activity_progress(activity)
         prefixes = {
             "file_downloaded": "[OK]",
             "page_saved": "[OK]",
@@ -2324,8 +2447,26 @@ class App(ctk.CTk):
     def _complete_sync(self, batch: SyncBatchResult, total: int) -> None:
         self._finish_sync_activity()
         self._set_busy(False)
-        self.progress.set(1 if total and not batch.cancelled else min(1, len(batch.results) / max(1, total)))
-        self.overall_var.set(f"{len(batch.results)} / {total} course")
+        completed_courses = sum(
+            result.status != "cancelled" for result in batch.results
+        )
+        self._sync_total_courses = total
+        self._sync_completed_courses = max(
+            self.__dict__.get("_sync_completed_courses", 0),
+            completed_courses,
+        )
+        if not batch.cancelled and total and completed_courses >= total:
+            final_target = 1.0
+        else:
+            final_target = overall_progress(
+                self._sync_completed_courses,
+                total,
+                0.0,
+            )
+        self._set_sync_progress_target(
+            1.0 if final_target >= 1.0 else 0.0,
+            completed_courses=self._sync_completed_courses,
+        )
         self._refresh_courses()
         if self.__dict__.get("_close_requested", False):
             self.current_course_var.set("Đang đóng ứng dụng...")

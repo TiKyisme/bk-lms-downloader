@@ -99,6 +99,8 @@ class DeepDownloader:
         self.root_course_dir: Optional[Path] = None
         self.root_course_name: Optional[str] = None
         self.known_sources: dict[Path, str] = {}
+        self._active_activity_index: int | None = None
+        self._active_activity_total: int | None = None
 
         self.stats = {
             "downloaded": 0,
@@ -112,6 +114,16 @@ class DeepDownloader:
         if self.event_callback is None:
             return
         try:
+            if event in {
+                "file_skipped",
+                "file_downloading",
+                "download_progress",
+                "file_downloaded",
+            }:
+                if self._active_activity_index is not None:
+                    payload.setdefault("activity_index", self._active_activity_index)
+                if self._active_activity_total is not None:
+                    payload.setdefault("activity_total", self._active_activity_total)
             self.event_callback({"event": event, "message": message, **payload})
         except Exception:
             pass
@@ -406,6 +418,7 @@ class DeepDownloader:
             f"Đang tải: {filename}",
             filename=filename,
             resource_name=filename,
+            bytes_total=remote_size,
         )
         try:
             with temp.open("wb") as file_obj:
@@ -423,6 +436,7 @@ class DeepDownloader:
                             f"Đang tải: {filename}",
                             filename=filename,
                             bytes_written=bytes_written,
+                            bytes_total=remote_size,
                             resource_name=filename,
                         )
                         last_heartbeat = now
@@ -1019,6 +1033,16 @@ class DeepDownloader:
         }
         self.course_structures.append(structure)
 
+        activity_total = sum(len(section.activities) for section in sections)
+        self.emit(
+            "course_structure_discovered",
+            "Đã nhận diện cấu trúc course",
+            course_name=course_name,
+            activity_total=activity_total,
+            depth=depth,
+        )
+
+        activity_index = 0
         for section in sections:
             self._check_cancelled()
             bucket_dir = self._bucket_dir(section.title)
@@ -1047,6 +1071,7 @@ class DeepDownloader:
 
             for activity in section.activities:
                 self._check_cancelled()
+                activity_index += 1
                 mod = activity.mod_type
                 context = (
                     f"{course_name} > {section.title} > {activity.name}"
@@ -1058,37 +1083,68 @@ class DeepDownloader:
                 )
 
                 print(f"\n  [{mod}] {activity.name}")
-                self.emit(
-                    "activity_processing",
-                    f"Đang xử lý: {activity.name}",
-                    activity_name=activity.name,
-                    section_title=section.title,
+                previous_activity = (
+                    self._active_activity_index,
+                    self._active_activity_total,
                 )
-
-                if mod in INTERACTIVE_MODS:
+                self._active_activity_index = activity_index
+                self._active_activity_total = activity_total
+                completed = False
+                try:
                     self.emit(
-                        "interactive_skipped",
-                        f"Bỏ qua {mod}: {activity.name}",
+                        "activity_processing",
+                        f"Đang xử lý: {activity.name}",
+                        activity_name=activity.name,
+                        section_title=section.title,
+                        activity_index=activity_index,
+                        activity_total=activity_total,
                     )
-                    continue
 
-                if mod == "resource" or mod == "pluginfile":
-                    try:
-                        response = self.fetch(
-                            activity.url,
-                            resource_name=activity.name,
+                    if mod in INTERACTIVE_MODS:
+                        self.emit(
+                            "interactive_skipped",
+                            f"Bỏ qua {mod}: {activity.name}",
                         )
-                        if not html_response(response):
-                            self.save_response_file(
-                                response,
-                                bucket_dir,
-                                activity.name,
+                    elif mod == "resource" or mod == "pluginfile":
+                        try:
+                            response = self.fetch(
                                 activity.url,
-                                context,
-                                prefix=section_prefix,
+                                resource_name=activity.name,
                             )
-                        else:
-                            response.close()
+                            if not html_response(response):
+                                self.save_response_file(
+                                    response,
+                                    bucket_dir,
+                                    activity.name,
+                                    activity.url,
+                                    context,
+                                    prefix=section_prefix,
+                                )
+                            else:
+                                response.close()
+                                self.crawl_moodle_link(
+                                    activity.url,
+                                    bucket_dir,
+                                    activity.name,
+                                    depth + 1,
+                                    context,
+                                    activity_prefix,
+                                )
+                        except SyncCancelled:
+                            raise
+                        except AuthenticationError:
+                            raise
+                        except Exception as exc:
+                            print(f"    [ERR] {exc}")
+                            self.stats["errors"] += 1
+                            self.log(
+                                status="error",
+                                context=activity.name,
+                                source=activity.url,
+                                error=str(exc),
+                            )
+                    else:
+                        try:
                             self.crawl_moodle_link(
                                 activity.url,
                                 bucket_dir,
@@ -1097,42 +1153,33 @@ class DeepDownloader:
                                 context,
                                 activity_prefix,
                             )
-                    except SyncCancelled:
-                        raise
-                    except AuthenticationError:
-                        raise
-                    except Exception as exc:
-                        print(f"    [ERR] {exc}")
-                        self.stats["errors"] += 1
-                        self.log(
-                            status="error",
-                            context=activity.name,
-                            source=activity.url,
-                            error=str(exc),
+                        except SyncCancelled:
+                            raise
+                        except AuthenticationError:
+                            raise
+                        except Exception as exc:
+                            self.stats["errors"] += 1
+                            self.log(
+                                status="error",
+                                context=activity.name,
+                                source=activity.url,
+                                error=str(exc),
+                            )
+                    completed = True
+                finally:
+                    if completed:
+                        self.emit(
+                            "activity_complete",
+                            f"Hoàn tất: {activity.name}",
+                            activity_name=activity.name,
+                            section_title=section.title,
+                            activity_index=activity_index,
+                            activity_total=activity_total,
                         )
-                    continue
-
-                try:
-                    self.crawl_moodle_link(
-                        activity.url,
-                        bucket_dir,
-                        activity.name,
-                        depth + 1,
-                        context,
-                        activity_prefix,
-                    )
-                except SyncCancelled:
-                    raise
-                except AuthenticationError:
-                    raise
-                except Exception as exc:
-                    self.stats["errors"] += 1
-                    self.log(
-                        status="error",
-                        context=activity.name,
-                        source=activity.url,
-                        error=str(exc),
-                    )
+                    (
+                        self._active_activity_index,
+                        self._active_activity_total,
+                    ) = previous_activity
 
         if depth == 0:
             meta_dir = self._meta_dir()
