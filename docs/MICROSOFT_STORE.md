@@ -12,20 +12,24 @@ Application / Git tag: 1.5.1 / v1.5.1
 
 Microsoft Store status:
 
-The v1.5.1 Store update has not yet been submitted. Microsoft Store may still
+Do not build or submit MSIX `1.5.1.0` from current main: application-code
+changes have landed after the public v1.5.1 release. Microsoft Store may still
 display the previously approved version.
 
-Next Microsoft Store submission target:
+Next combined release target, after the Store-launch fix is validated and
+release preparation bumps the application source version:
 
 ```text
-Microsoft Store MSIX:       1.5.1.0
+Application / Git tag: 1.5.2 / v1.5.2
+Microsoft Store MSIX:  1.5.2.0
 ```
 
-Do not reuse the packaging-only `1.1.1.0` version and do not create versions
-such as `1.3.0.1`. Before preparing the next MSIX, run:
+The fourth MSIX version component must remain `0`. Do not reuse the packaging-
+only `1.1.1.0` version or create versions such as `1.5.2.1`. During future
+release preparation, after the source version is `1.5.2`, run:
 
 ```powershell
-python tools/validate_versions.py --tag v1.5.1 --msix-version 1.5.1.0
+python tools/validate_versions.py --tag v1.5.2 --msix-version 1.5.2.0
 ```
 
 The command fails if `pyproject.toml`, package `__version__`, the tag, or the
@@ -33,40 +37,45 @@ MSIX version disagree, or if the fourth MSIX component is non-zero.
 
 ## Reproducible x64 MSIX packaging
 
-Use the build virtual environment after installing `.[dev]`. Run on Windows:
+Use the build virtual environment after installing `.[dev]`. Run on Windows for
+a local, test-only candidate while source version is still `1.5.1`:
 
 ```powershell
-.venv-build/Scripts/python.exe tools/build_msix.py --identity-package <trusted-previous.msix> --makeappx <path-to-makeappx.exe> --output dist/store
+.venv-build/Scripts/python.exe tools/build_msix.py --identity-package <trusted-previous.msix> --makeappx <path-to-makeappx.exe> --output <empty-temp-directory> --local-test-version 1.5.2.0
 ```
 
-The existing local Store packages were created with MSIX Packaging Tool. The
-builder reuses their manifest and branded `Assets` only, preserving Store
-identity, desktop entry point, Windows minimum version and `runFullTrust`
-capability. Obtain the seed from a trusted previous submission and verify its
-Name, Publisher and PublisherDisplayName against Partner Center's Product
-identity page. Never substitute guessed identity values. The seed remains local.
+The builder reads a seed's identity and branding assets, then generates a new
+reviewed manifest. It does not carry forward historical extensions or shortcut
+declarations. Obtain the seed from a trusted previous Store submission and
+verify its Name, Publisher and PublisherDisplayName against Partner Center's
+Product identity page. An unsigned file can be a legitimate Store submission
+artifact, but its provenance must be independently known; an unverified local
+build is not evidence of a prior submission. Never substitute guessed identity
+values. Keep the seed local.
 
-The command derives the version from the canonical app version with a fourth
-component of zero, rebuilds the Windows EXE with PyInstaller's clean mode, runs
-all four packaged self-tests, and packs/unpacks with MakeAppx validation enabled.
-It checks the exact payload allowlist, asset references, x64 GUI executable,
-fresh EXE hash and manifest identity. Existing output packages are not replaced.
-MakeAppx is available in Windows SDK or MSIX Packaging Tool's SDK directory.
+The local-test option accepts only the next patch candidate, does not change the
+canonical source version, and never builds the already-public version. For a
+Store release, first bump source version and create the matching release tag;
+then omit `--local-test-version`. The builder rebuilds the Windows EXE, runs all
+four packaged self-tests, and packs/unpacks with MakeAppx. It checks the payload
+allowlist, manifest launch policy, asset references, x64 GUI executable and
+fresh EXE hash. Existing output packages are not replaced.
 
-The output is an **unsigned Store submission package**. Microsoft signs Store
-submissions; local sideload testing needs a separately test-signed copy and a
-trusted test certificate. Never upload that test copy or commit certificates,
-keys, generated MSIX files, or package workspaces. WACK and an installed-package
-launch test are separate checks; the builder does not claim those were run.
+The output is unsigned. For local install/update testing, sign only a disposable
+copy with a test certificate matching the package Publisher, trust it locally,
+and remove the package and certificate after testing. Never upload a test copy
+or commit certificates, keys, generated MSIX files, or package workspaces.
+WACK and installed-package launch/update tests are separate checks; the builder
+does not claim those were run.
 
 ## Partner Center submission checklist
 
 1. Open BK-LMS Downloader (`9N1TTL7WPJT0`) in Partner Center and compare Product
    identity with the package manifest (Name `TiKyisme.BK-LMSDownloader`).
-2. Check that `1.5.1.0` exceeds every currently approved or submitted package
+2. Check that `1.5.2.0` exceeds every currently approved or submitted package
    version; local historical packages alone do not establish live Store state.
 3. Create an update submission. On Packages, upload only the validated
-   `BK-LMS-Downloader_1.5.1.0_x64.msix` and wait for package validation.
+   `BK-LMS-Downloader_1.5.2.0_x64.msix` and wait for package validation.
 4. Preserve existing listing, privacy policy and age ratings unless a required
    field is incomplete. Review any capability/certification requirements.
 5. Suggested update notes: "Fixes synchronization and AI Study Pack progress
