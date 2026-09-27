@@ -1,5 +1,5 @@
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -96,6 +96,15 @@ def checked_courses(courses: Iterable[Course]) -> list[Course]:
 
 
 @dataclass
+class ResourceFailure:
+    """Sanitized detail for one recoverable child-resource failure."""
+
+    title: str
+    source: str = ""
+    reason: str = ""
+
+
+@dataclass
 class CourseSyncResult:
     """Structured outcome for one course sync, independent of GUI text."""
 
@@ -110,6 +119,7 @@ class CourseSyncResult:
     errors: int = 0
     status: str = "success"
     error_message: Optional[str] = None
+    resource_failures: list[ResourceFailure] = field(default_factory=list)
 
 
 @dataclass
@@ -138,7 +148,15 @@ class SyncBatchResult:
 
     @property
     def synced_courses(self) -> int:
-        return sum(result.status in {"success", "up_to_date"} for result in self.results)
+        return sum(result.status in {"success", "up_to_date", "partial"} for result in self.results)
+
+    @property
+    def partial_errors(self) -> int:
+        return sum(result.errors for result in self.results if result.status == "partial")
+
+    @property
+    def fatal_course_failures(self) -> int:
+        return sum(result.status == "error" for result in self.results)
 
 
 def _non_negative_int(value: object) -> int:
