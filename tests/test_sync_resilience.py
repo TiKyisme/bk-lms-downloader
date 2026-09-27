@@ -18,7 +18,7 @@ from bklms_downloader.config import (
 from bklms_downloader.crawler import AuthenticationError, DeepDownloader, ResourceTimeout, SyncCancelled
 from bklms_downloader.course_store import CourseStore
 from bklms_downloader.gui import App
-from bklms_downloader.models import Course, CourseSyncResult, SyncBatchResult
+from bklms_downloader.models import Activity, Course, CourseSyncResult, Section, SyncBatchResult
 from bklms_downloader.sync_manager import SyncManager
 from bklms_downloader.sync_smoke import run_synthetic_sync_smoke
 
@@ -257,7 +257,54 @@ class BatchDownloader:
         if isinstance(outcome, Exception):
             raise outcome
         self.stats.update(outcome)
-        return self.output / "Course"
+        destination = self.output / "Course"
+        destination.mkdir(parents=True, exist_ok=True)
+        return destination
+
+
+def test_real_crawl_with_one_child_failure_is_partial_and_finishes(tmp_path: Path, monkeypatch):
+    root_url = "https://lms.hcmut.edu.vn/course/view.php?id=1"
+    outcomes: list[object] = [make_response(root_url, b"<html></html>", filename="root.html")]
+    outcomes[0].headers["Content-Type"] = "text/html"
+    for index in range(45):
+        if index == 17:
+            outcomes.append(requests.HTTPError("404 Client Error: Not Found for url: https://lms.hcmut.edu.vn/pluginfile.php/missing?token=private"))
+        else:
+            outcomes.append(make_response(
+                f"https://lms.hcmut.edu.vn/pluginfile.php/{index}",
+                f"file-{index}".encode(),
+                filename=f"file-{index}.pdf",
+            ))
+    session = RecordingSession(outcomes)
+    monkeypatch.setattr(
+        "bklms_downloader.crawler.parse_sections",
+        lambda *_args: (
+            "Course one",
+            [Section(
+                1,
+                "Week 1",
+                "<div></div>",
+                [Activity(i + 1, f"Resource {i + 1}", f"https://lms.hcmut.edu.vn/pluginfile.php/{i}", "resource") for i in range(45)],
+            )],
+        ),
+    )
+    course = Course("one", root_url, str(tmp_path / "download"), name="Course one")
+    events: list[dict] = []
+
+    batch = SyncManager().sync_courses([course], session, events.append)
+
+    result = batch.results[0]
+    assert result.status == "partial"
+    assert result.output is not None and result.output.is_dir()
+    assert result.downloaded == 44
+    assert result.errors == 1
+    assert batch.synced_courses == 1
+    warnings = [event for event in events if event.get("activity", {}).get("event") == "resource_warning"]
+    assert len(warnings) == 1
+    failure = warnings[0]["activity"]["failure"]
+    assert failure["title"] == "Resource 18"
+    assert "token" not in failure["source"]
+    assert any(path.is_file() for path in result.output.rglob("*"))
 
 
 def test_cancelled_batch_stops_before_next_course_and_emits_completion(tmp_path: Path):
@@ -429,6 +476,9 @@ class FakeVar:
     def set(self, value):
         self.value = value
 
+    def get(self):
+        return self.value
+
 
 def bare_sync_app() -> App:
     app = App.__new__(App)
@@ -463,7 +513,7 @@ def bare_sync_app() -> App:
     ("batch", "expected"),
     [
         (SyncBatchResult([]), "counts"),
-        (SyncBatchResult([CourseSyncResult("1", "url", "course", None, errors=1, status="error")]), "Hoàn tất với 1 lỗi"),
+        (SyncBatchResult([CourseSyncResult("1", "url", "course", None, errors=1, status="error")]), "Hoàn tất với 1 course lỗi"),
         (SyncBatchResult([], cancelled=True), "Đã hủy đồng bộ."),
     ],
 )
@@ -478,3 +528,30 @@ def test_gui_sync_state_returns_to_idle_after_success_error_or_cancel(monkeypatc
     assert app.sync_cancel_event is None
     assert app.cancel_sync_btn.state == "disabled"
     assert expected in app.summary
+
+
+def test_completed_partial_sync_finishes_progress_at_100_with_warning(monkeypatch):
+    app = bare_sync_app()
+    app._progress_total_courses = 1
+    app._progress_completed_courses = 0
+    app._sync_total_courses = 1
+    app._sync_completed_courses = 0
+    app.displayed_progress = 0.98
+    app.target_progress = 0.98
+    app._progress_animation_scheduled = False
+    app._destroyed = False
+    callbacks = []
+    app._schedule_ui_callback = lambda delay, callback: callbacks.append(callback) or True
+    monkeypatch.setattr("bklms_downloader.gui.messagebox.showinfo", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("bklms_downloader.gui.messagebox.showwarning", lambda *_args, **_kwargs: None)
+
+    result = CourseSyncResult("1", "url", "Course one", Path("course"), downloaded=44, errors=1, status="partial")
+    App._complete_sync(app, SyncBatchResult([result]), total=1)
+    while callbacks:
+        callbacks.pop(0)()
+
+    assert app.target_progress == 1.0
+    assert app.overall_var.get() == "100% • 1 / 1 course hoàn tất"
+    assert "1 cảnh báo" in app.summary
+    assert "44 file mới" in app.summary
+    assert "1 lỗi tài nguyên" in app.summary

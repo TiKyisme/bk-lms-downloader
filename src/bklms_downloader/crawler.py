@@ -7,7 +7,7 @@ import tempfile
 from pathlib import Path
 from threading import Event
 from typing import Callable, Iterable, Optional
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, urlunparse
 
 import requests
 from urllib3.response import HTTPResponse
@@ -129,12 +129,66 @@ class DeepDownloader:
             pass
 
     def log(self, **record) -> None:
+        is_failure = record.get("status") == "error"
+        if is_failure:
+            if record.get("source"):
+                record["source"] = self._safe_diagnostic_source(str(record["source"]))
+            if record.get("error"):
+                record["error"] = self._safe_diagnostic_text(str(record["error"]))
+            if record.get("context"):
+                record["context"] = self._safe_diagnostic_text(str(record["context"]))
         self.manifest.append(record)
         if record.get("path") and record.get("source"):
             self.known_sources[Path(record["path"])] = str(record["source"])
-        if record.get("status") == "error":
-            detail = record.get("error") or record.get("source") or "Unknown error"
-            self.emit("error", f"Lỗi: {detail}", **record)
+        if is_failure:
+            context = str(record.get("context") or "")
+            title = context.rsplit(" > ", 1)[-1].removeprefix("section:") or "Tài nguyên BK-LMS"
+            reason = str(record.get("error") or "Lỗi không xác định")[:240]
+            source = str(record.get("source") or "")
+            if context == "course":
+                detail = reason or source or "Không thể mở course."
+                self.emit("error", f"Lỗi course: {detail}", **record)
+            else:
+                message = f"Không tải được: {title} — {reason}"
+                self.emit(
+                    "resource_warning",
+                    message,
+                    failure={"title": title[:160], "source": source[:500], "reason": reason},
+                )
+
+    @staticmethod
+    def _safe_diagnostic_source(value: str) -> str:
+        try:
+            parsed = urlparse(value)
+            if parsed.scheme.lower() in {"http", "https"} and parsed.hostname:
+                host = parsed.hostname
+                if parsed.port:
+                    host = f"{host}:{parsed.port}"
+                return urlunparse((parsed.scheme, host, parsed.path, "", "", ""))
+        except ValueError:
+            pass
+        return value.split("?", 1)[0].split("#", 1)[0][:500]
+
+    @classmethod
+    def _safe_diagnostic_text(cls, value: str) -> str:
+        text = re.sub(
+            r"https?://[^\s<>\"']+",
+            lambda match: cls._safe_diagnostic_source(match.group(0)),
+            value,
+            flags=re.IGNORECASE,
+        )
+        text = re.sub(
+            r"(?i)\b(authorization|proxy-authorization)\s*[:=]\s*(?:bearer|basic)\s+\S+",
+            r"\1=[redacted]",
+            text,
+        )
+        text = re.sub(r"(?i)\b(cookie|set-cookie)\s*[:=]\s*[^\r\n]+", r"\1=[redacted]", text)
+        text = re.sub(
+            r"(?i)\b(access[_-]?token|refresh[_-]?token|token|session(?:id|[_-]?id)?|sesskey)\s*[:=]\s*[^\s,;]+",
+            r"\1=[redacted]",
+            text,
+        )
+        return text[:500]
 
     def _check_cancelled(self) -> None:
         if self.cancel_event is not None and self.cancel_event.is_set():

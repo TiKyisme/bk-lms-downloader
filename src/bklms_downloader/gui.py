@@ -1436,6 +1436,8 @@ class App(ctk.CTk):
     def _status_text(course: Course) -> tuple[str, str]:
         if course.last_status == "cancelled":
             return "Đã hủy", THEME.muted_text
+        if course.last_status == "partial":
+            return f"Hoàn tất • {course.last_errors} lỗi", "#B7791F"
         if course.last_status not in {"never", "success", "up_to_date"}:
             return f"{max(1, course.last_errors)} lỗi", THEME.danger
         if course.study_pack_status == "dirty":
@@ -2377,7 +2379,7 @@ class App(ctk.CTk):
         elif kind == "course_sync_complete":
             result = event["result"]
             index, total = event["index"], event["total"]
-            if result.status in {"success", "up_to_date"}:
+            if result.status in {"success", "up_to_date", "partial"}:
                 self._sync_completed_courses = min(
                     total,
                     self.__dict__.get("_sync_completed_courses", 0) + 1,
@@ -2388,8 +2390,11 @@ class App(ctk.CTk):
             self._refresh_course_row(result.course_id)
             if result.status == "cancelled":
                 self._log(f"[CANCEL] {result.name} — giữ {result.downloaded} file đã tải")
+            elif result.status == "partial":
+                self._log(f"[WARN] {result.name} — đồng bộ xong với {result.errors} lỗi tài nguyên.")
             elif result.status == "error":
-                self._log(f"[ERROR] {result.name}: không thể đồng bộ.")
+                detail = result.error_message or "không thể hoàn tất course"
+                self._log(f"[ERROR] {result.name}: {detail}")
             else:
                 suffix = "Không có thay đổi" if result.status == "up_to_date" else f"{result.downloaded} mới"
                 self._log(f"[DONE] {result.name} — {suffix}, {result.skipped} giữ nguyên")
@@ -2505,6 +2510,7 @@ class App(ctk.CTk):
             "page_saved": "[OK]",
             "file_skipped": "[SKIP]",
             "error": "[ERROR]",
+            "resource_warning": "[WARN]",
             "activity_processing": "[WORK]",
             "resource_opening": "[OPEN]",
             "file_downloading": "[DOWNLOAD]",
@@ -2530,7 +2536,7 @@ class App(ctk.CTk):
         self._finish_sync_activity()
         self._set_busy(False)
         completed_courses = sum(
-            result.status in {"success", "up_to_date"}
+            result.status in {"success", "up_to_date", "partial"}
             for result in batch.results
         )
         self._sync_total_courses = total
@@ -2540,7 +2546,7 @@ class App(ctk.CTk):
         )
         self._progress_total_courses = total
         self._progress_completed_courses = self._sync_completed_courses
-        fully_successful = bool(total) and not batch.cancelled and not batch.errors and not batch.authentication_error and self._sync_completed_courses >= total
+        fully_successful = bool(total) and not batch.cancelled and not batch.authentication_error and not batch.fatal_course_failures and self._sync_completed_courses >= total
         self._sync_current_course_fraction = 0.0
         self._set_sync_progress_target(
             0.0,
@@ -2576,7 +2582,21 @@ class App(ctk.CTk):
             )
         else:
             self._set_login_status("Đã đăng nhập BK-LMS", "success")
-            if batch.errors:
+            if batch.fatal_course_failures:
+                summary = (
+                    f"Hoàn tất với {batch.fatal_course_failures} course lỗi"
+                    f" • {batch.downloaded} file mới • {batch.skipped} giữ nguyên"
+                )
+                if batch.partial_errors:
+                    summary += f" • {batch.partial_errors} lỗi tài nguyên ở course đã hoàn tất"
+                self._set_summary_message(summary)
+            elif batch.partial_errors:
+                self._set_summary_message(
+                    f"Hoàn tất với {batch.partial_errors} cảnh báo • "
+                    f"{batch.downloaded} file mới • {batch.skipped} giữ nguyên • "
+                    f"{batch.errors} lỗi tài nguyên"
+                )
+            elif batch.errors:
                 self._set_summary_message(
                     f"Hoàn tất với {batch.errors} lỗi • {batch.downloaded} file mới • {batch.skipped} giữ nguyên"
                 )

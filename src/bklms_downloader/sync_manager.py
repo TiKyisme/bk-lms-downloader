@@ -9,7 +9,7 @@ import requests
 
 from .course_store import CourseStore
 from .crawler import DeepDownloader, SyncCancelled
-from .models import Course, CourseSyncResult, SyncBatchResult
+from .models import Course, CourseSyncResult, ResourceFailure, SyncBatchResult
 
 
 EventCallback = Callable[[dict[str, Any]], None]
@@ -160,13 +160,15 @@ class SyncManager:
             output = downloader.crawl_course(course.url, course.output_path, depth=0)
             stats = dict(downloader.stats)
             name = getattr(downloader, "root_course_name", None) or course.display_name
-            if output is None:
-                message = "Không thể đồng bộ course này."
+            output_path = Path(output) if output is not None else None
+            if output_path is None or not output_path.is_dir():
+                message = "Không thể tạo thư mục course đã đồng bộ."
                 return self._result(course, name, None, stats, "error", message)
-            status = "error" if stats.get("errors", 0) else (
+            failures = self._resource_failures(getattr(downloader, "manifest", ()))
+            status = "partial" if stats.get("errors", 0) else (
                 "success" if stats.get("downloaded", 0) else "up_to_date"
             )
-            return self._result(course, name, Path(output), stats, status)
+            return self._result(course, name, output_path, stats, status, resource_failures=failures)
         except SyncCancelled:
             return self._result(
                 course, course.display_name, getattr(downloader, "root_course_dir", None),
@@ -192,6 +194,7 @@ class SyncManager:
         stats: dict[str, int],
         status: str,
         error_message: str | None = None,
+        resource_failures: list[ResourceFailure] | None = None,
     ) -> CourseSyncResult:
         return CourseSyncResult(
             course_id=course.id,
@@ -205,7 +208,29 @@ class SyncManager:
             errors=int(stats.get("errors", 0)),
             status=status,
             error_message=error_message,
+            resource_failures=resource_failures or [],
         )
+
+    @staticmethod
+    def _resource_failures(manifest: Iterable[dict[str, Any]]) -> list[ResourceFailure]:
+        failures: list[ResourceFailure] = []
+        for record in manifest:
+            if record.get("status") != "error" or record.get("context") == "course":
+                continue
+            context = str(record.get("context") or "Tài nguyên BK-LMS")
+            title = DeepDownloader._safe_diagnostic_text(
+                context.rsplit(" > ", 1)[-1].removeprefix("section:")
+            )[:160]
+            failures.append(
+                ResourceFailure(
+                    title=title or "Tài nguyên BK-LMS",
+                    source=DeepDownloader._safe_diagnostic_source(str(record.get("source") or ""))[:500],
+                    reason=DeepDownloader._safe_diagnostic_text(str(record.get("error") or "Lỗi không xác định"))[:240],
+                )
+            )
+            if len(failures) >= 20:
+                break
+        return failures
 
     @staticmethod
     def _is_authentication_error(result: CourseSyncResult) -> bool:

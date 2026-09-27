@@ -64,12 +64,13 @@ def test_two_course_sync_completion_never_double_counts_active_course():
         {
             "event": "course_sync_complete",
             "course": first,
-            "result": CourseSyncResult("1", first.url, first.name, None, status="success"),
+            "result": CourseSyncResult("1", first.url, first.name, None, errors=1, status="partial"),
             "index": 1,
             "total": 2,
         },
     )
     assert app.target_progress == 0.5
+    assert app._sync_completed_courses == 1
 
     App._handle_event(app, {"event": "course_sync_start", "course": second, "index": 2, "total": 2})
     App._handle_crawler_event(
@@ -96,6 +97,22 @@ def test_active_last_activity_is_capped_below_course_boundary():
 
     assert raw_fraction == 1.0
     assert cap_active_course_fraction(raw_fraction) == ACTIVE_COURSE_MAX
+
+
+def test_partial_course_status_is_warning_not_fatal_red():
+    course = Course(
+        "one",
+        "https://lms.hcmut.edu.vn/course/view.php?id=1",
+        "one",
+        last_status="partial",
+        last_downloaded=44,
+        last_errors=1,
+    )
+
+    label, color = App._status_text(course)
+
+    assert label == "Hoàn tất • 1 lỗi"
+    assert color != "#DC3545"
 
 
 def test_ai_two_course_events_count_completed_courses_not_current_index():
