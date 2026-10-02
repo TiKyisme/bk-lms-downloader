@@ -42,6 +42,8 @@ def test_both_platforms_bundle_current_ai_and_gui_dependencies():
         assert "markdownify" in rendered
         assert "pypdf" in rendered
         assert "pptx" in rendered
+        assert "docx" in rendered
+        assert "openpyxl" in rendered
         assert "selenium" in rendered
         assert "fitz" in rendered
 

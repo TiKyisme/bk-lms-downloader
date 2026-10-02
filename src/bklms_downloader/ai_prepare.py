@@ -8,14 +8,16 @@ import sys
 import tempfile
 import traceback
 import zipfile
+from collections import Counter
 from contextlib import redirect_stdout
-from dataclasses import dataclass
+from dataclasses import dataclass, field as dataclass_field
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Callable, Iterable
 
 from .app_logging import get_logger
 from .ai_study_pack import NAVIGATION_FILES, validate_ai_study_pack
+from .ai_sources import inventory_course_sources
 from .models import Course
 from .study_pack_refresh import CoursewaveEnricher, StudyPackRefresher, plan_refresh
 from .zip_safety import safe_extract_zip
@@ -28,6 +30,8 @@ REQUIRED_AI_MODULES = {
     "markdownify": "markdownify",
     "pypdf": "pypdf",
     "python-pptx": "pptx",
+    "python-docx": "docx",
+    "openpyxl": "openpyxl",
 }
 
 
@@ -133,6 +137,25 @@ def _ai_runtime_self_test() -> Path:
             slide.shapes.title.text = f"{title} visual source"
             presentation.save(course_root / "tiny.pptx")
 
+            from docx import Document
+
+            word_document = Document()
+            word_document.add_heading(f"{title} office source", level=1)
+            word_document.add_paragraph(f"{marker} DOCX lecturer material explains one course concept.")
+            table = word_document.add_table(rows=1, cols=2)
+            table.rows[0].cells[0].text = "Topic"
+            table.rows[0].cells[1].text = marker
+            word_document.save(course_root / "tiny.docx")
+
+            from openpyxl import Workbook
+
+            workbook = Workbook()
+            sheet = workbook.active
+            sheet.title = "Course data"
+            sheet.append(["Source marker", marker])
+            sheet.append(["Formula preserved", "=1+1"])
+            workbook.save(course_root / "tiny.xlsx")
+
         specs = (
             ("A", "AI runtime course A", "PACKAGED_COURSE_A_ONLY"),
             ("B", "AI runtime course B", "PACKAGED_COURSE_B_ONLY"),
@@ -151,6 +174,15 @@ def _ai_runtime_self_test() -> Path:
                 )
             )
             expected_markers[title] = marker
+
+        diagnostic = _load_ai_pipeline(default_ai_tool_path()).diagnose_course_directory(
+            base / "Course A"
+        )
+        diagnostic_text = json.dumps(diagnostic, ensure_ascii=False)
+        if not diagnostic.get("meaningful_lecturer_source_count"):
+            raise RuntimeError("AI course diagnostic self-test found no teaching evidence")
+        if str(base) in diagnostic_text or any(marker in diagnostic_text for marker in expected_markers.values()):
+            raise RuntimeError("AI course diagnostic self-test leaked a path or source content")
 
         batch = AIBatchPreparer().prepare_courses(
             courses,
@@ -186,6 +218,15 @@ def _ai_runtime_self_test() -> Path:
                     raise RuntimeError("AI runtime self-test included legacy navigation")
                 if not any(name.startswith("sources/") for name in names):
                     raise RuntimeError("AI runtime self-test did not retain source evidence")
+                documents = archive.read("meta/documents.jsonl").decode("utf-8")
+                if '"source_type": "word_document"' not in documents:
+                    raise RuntimeError("AI runtime self-test did not extract DOCX sources")
+                if '"source_type": "spreadsheet"' not in documents:
+                    raise RuntimeError("AI runtime self-test did not extract XLSX sources")
+                if not any(name.startswith("sources/") and name.lower().endswith(".docx") for name in names):
+                    raise RuntimeError("AI runtime self-test did not retain the original DOCX")
+                if not any(name.startswith("sources/") and name.lower().endswith(".xlsx") for name in names):
+                    raise RuntimeError("AI runtime self-test did not retain the original XLSX")
                 text = "\n".join(
                     archive.read(name).decode("utf-8", errors="replace")
                     for name in names
@@ -199,6 +240,8 @@ def _ai_runtime_self_test() -> Path:
                 ]
                 if any(marker in text for marker in other_markers):
                     raise RuntimeError("AI runtime self-test mixed course source data")
+                if "=1+1" not in text:
+                    raise RuntimeError("AI runtime self-test did not preserve spreadsheet formula text")
             with tempfile.TemporaryDirectory(prefix="bklms_ai_pack_roundtrip_") as unpacked:
                 with zipfile.ZipFile(pack) as archive:
                     safe_extract_zip(archive, Path(unpacked))
@@ -269,6 +312,16 @@ def _load_ai_pipeline(script_path: Path) -> ModuleType:
     return module
 
 
+def run_ai_course_diagnostic(course_folder: Path) -> dict:
+    """Run the bundled safe, course-specific source diagnostic."""
+    pipeline = _load_ai_pipeline(default_ai_tool_path())
+    diagnostic = getattr(pipeline, "diagnose_course_directory", None)
+    if not callable(diagnostic):
+        raise AIPreparationError("The bundled AI source diagnostic is unavailable.")
+    result = diagnostic(Path(course_folder))
+    return result if isinstance(result, dict) else {}
+
+
 class AICoursePreparer:
     """Run the bundled local pipeline for exactly one downloaded course."""
 
@@ -284,6 +337,9 @@ class AICoursePreparer:
         self.pipeline_loader = pipeline_loader
         self._pipeline: ModuleType | None = None
         self.last_enrichment_warnings: tuple[str, ...] = ()
+        self.last_source_warnings: tuple[str, ...] = ()
+        self.last_source_inventory: dict = {}
+        self.last_source_metrics: dict = {}
         self.last_refresh_state = "missing"
 
     def prepare(
@@ -301,6 +357,11 @@ class AICoursePreparer:
         progress_callback: Callable[[dict], None] | None = None,
         cancel_event=None,
     ) -> Path:
+        self.last_enrichment_warnings = ()
+        self.last_source_warnings = ()
+        self.last_source_inventory = {}
+        self.last_source_metrics = {}
+        self.last_refresh_state = "missing"
         missing = missing_ai_dependencies(self.dependency_importer)
         if missing:
             raise OptionalAIDependenciesError(
@@ -310,6 +371,23 @@ class AICoursePreparer:
         source_root = Path(course_root).expanduser().resolve()
         if not source_root.is_dir():
             raise AIPreparationError("Không tìm thấy thư mục course đã tải.")
+        inventory = inventory_course_sources(source_root)
+        self.last_source_inventory = inventory.to_dict()
+        if inventory.lecturer_material_candidates == 0:
+            if inventory.total_source_files == 0:
+                raise AIPreparationError(
+                    "Th\u01b0 m\u1ee5c course tr\u1ed1ng; kh\u00f4ng c\u00f3 t\u00e0i li\u1ec7u h\u1ecdc \u0111\u1ec3 t\u1ea1o Study Pack."
+                )
+            unsupported_types = Counter(
+                Path(relative).suffix.lower() or "(kh\u00f4ng c\u00f3 ph\u1ea7n m\u1edf r\u1ed9ng)"
+                for relative in inventory.unsupported_relative_paths
+            )
+            details = " \u2022 ".join(f"{extension}: {count}" for extension, count in sorted(unsupported_types.items()))
+            if details:
+                raise AIPreparationError(
+                    "Course c\u00f3 t\u00e0i li\u1ec7u \u0111\u00e3 t\u1ea3i nh\u01b0ng ch\u01b0a c\u00f3 lo\u1ea1i file c\u00f3 th\u1ec3 x\u1eed l\u00fd. " + details
+                )
+            raise AIPreparationError("Kh\u00f4ng t\u00ecm th\u1ea5y t\u00e0i li\u1ec7u h\u1ecdc c\u00f3 th\u1ec3 x\u1eed l\u00fd trong course.")
         destination = Path(output or default_ai_archive_destination(source_root)).expanduser().resolve()
         if destination == source_root or source_root in destination.parents:
             raise AIPreparationError("Thư mục đích ZIP không được nằm trong course đã tải.")
@@ -340,6 +418,12 @@ class AICoursePreparer:
         refresh_plan = plan_refresh(owned_pack, source_root)
         self.last_refresh_state = refresh_plan.state
         report(
+            "source_preflight",
+            0.03,
+            "Đã kiểm kê tài liệu BK-LMS.",
+            source_inventory=inventory.to_dict(),
+        )
+        report(
             "planning",
             0.04,
             "Đang lập kế hoạch cập nhật Study Pack...",
@@ -365,6 +449,7 @@ class AICoursePreparer:
         self.last_enrichment_warnings = tuple(enrichment.warnings) if enrichment else ()
         if refresh_plan.state == "up_to_date" and owned_pack is not None and not enrich_exams:
             report("validation", 0.98, "Đang kiểm tra Study Pack đã sẵn sàng.")
+            self._read_pack_diagnostics(owned_pack)
             return owned_pack
 
         try:
@@ -386,6 +471,7 @@ class AICoursePreparer:
                                 existing_pack=owned_pack if refresh_plan.state == "dirty" else None,
                                 refresh_plan=refresh_plan,
                                 progress_callback=progress_callback,
+                                source_inventory=inventory.to_dict(),
                             )
                         )
                     report("pipeline_complete", 0.95, "Đã hoàn tất sinh nội dung Study Pack.")
@@ -421,11 +507,55 @@ class AICoursePreparer:
         except Exception as exc:
             if type(exc).__name__ == "PreparationCancelled":
                 raise AIPreparationCancelled("Đã hủy chuẩn bị AI.") from exc
+            if "No usable course teaching sources were included" in str(exc):
+                extension_counts = self.last_source_inventory.get("extension_counts", {})
+                detected_types = " • ".join(
+                    f"{extension}: {count}"
+                    for extension, count in sorted(extension_counts.items())
+                ) if isinstance(extension_counts, dict) else ""
+                if detected_types:
+                    raise AIPreparationError(
+                        "Kh\u00f4ng tr\u00edch xu\u1ea5t được bằng chứng học tập hữu ích. "
+                        "Loại file đã phát hiện: " + detected_types
+                    ) from exc
+                raise AIPreparationError(
+                    "Không tạo được AI Study Pack hữu ích: không đọc được tài liệu học trong course."
+                ) from exc
             LOG.exception("AI preparation failed for %s", source_root)
             raise AIPreparationError("Không thể chuẩn bị course cho AI. Hãy thử lại sau.") from exc
         if not isinstance(output_path, Path) or output_path.suffix.lower() != ".zip":
             raise AIPreparationError("Chuẩn bị AI không tạo được ZIP hợp lệ.")
+        self._read_pack_diagnostics(output_path)
         return output_path
+
+    def _read_pack_diagnostics(self, pack_path: Path) -> None:
+        try:
+            with zipfile.ZipFile(pack_path) as archive:
+                manifest = json.loads(archive.read("meta/pack_manifest.json").decode("utf-8"))
+            inventory = manifest.get("source_inventory", {})
+            metrics = manifest.get("source_metrics", {})
+            if isinstance(inventory, dict):
+                self.last_source_inventory = inventory
+            self.last_source_metrics = metrics if isinstance(metrics, dict) else {}
+        except (OSError, KeyError, ValueError, zipfile.BadZipFile):
+            self.last_source_metrics = {}
+            return
+
+        warnings: list[str] = []
+        error_count = int(self.last_source_metrics.get("source_error_count", 0) or 0)
+        unsupported_count = int(self.last_source_metrics.get("unsupported_source_count", 0) or 0)
+        if error_count:
+            warnings.append(
+                "Không đọc được " + str(error_count) + " tài liệu; các nguồn hợp lệ khác vẫn được giữ."
+            )
+        if unsupported_count:
+            unsupported_types = Counter(
+                Path(relative).suffix.lower() or "(không có phần mở rộng)"
+                for relative in self.last_source_inventory.get("unsupported_relative_paths", [])
+            )
+            details = " • ".join(f"{extension}: {count}" for extension, count in sorted(unsupported_types.items()))
+            warnings.append("Tài liệu chưa hỗ trợ" + (f" ({details})" if details else "") + ".")
+        self.last_source_warnings = tuple(warnings)
 
     @staticmethod
     def _next_output_path(destination: Path, candidate: Path) -> Path:
@@ -489,6 +619,7 @@ def _pipeline_arguments(
     existing_pack: Path | None = None,
     refresh_plan=None,
     progress_callback: Callable[[dict], None] | None = None,
+    source_inventory: dict | None = None,
 ) -> SimpleNamespace:
     """Keep GUI preparation local and deterministic: no transcription or cloud."""
     return SimpleNamespace(
@@ -498,6 +629,7 @@ def _pipeline_arguments(
         course_name=course_name,
         cancel_event=cancel_event,
         progress_callback=progress_callback,
+        source_inventory=source_inventory,
         incremental_existing_pack=existing_pack,
         incremental_reuse_paths=tuple(getattr(refresh_plan, "reused_sources", ())),
         incremental_stale_paths=tuple(
@@ -523,10 +655,17 @@ class AICoursePreparationResult:
     refresh_state: str = "missing"
     coursewave_enabled: bool = False
     warnings: tuple[str, ...] = ()
+    source_warnings: tuple[str, ...] = ()
+    source_inventory: dict = dataclass_field(default_factory=dict)
+    source_metrics: dict = dataclass_field(default_factory=dict)
 
     @property
     def succeeded(self) -> bool:
         return self.output is not None and self.error is None
+
+    @property
+    def succeeded_with_warnings(self) -> bool:
+        return self.succeeded and bool(self.warnings or self.source_warnings)
 
 
 @dataclass(frozen=True)
@@ -624,6 +763,9 @@ class AIBatchPreparer:
                     refresh_state=getattr(preparer, "last_refresh_state", "missing"),
                     coursewave_enabled=enrich_exams,
                     warnings=tuple(getattr(preparer, "last_enrichment_warnings", ())),
+                    source_warnings=tuple(getattr(preparer, "last_source_warnings", ())),
+                    source_inventory=dict(getattr(preparer, "last_source_inventory", {}) or {}),
+                    source_metrics=dict(getattr(preparer, "last_source_metrics", {}) or {}),
                 )
             except AIPreparationCancelled:
                 cancelled = True
@@ -633,6 +775,11 @@ class AIBatchPreparer:
                 result = AICoursePreparationResult(
                     course=course,
                     error=_error_summary(exc),
+                    refresh_state=getattr(preparer, "last_refresh_state", "missing"),
+                    warnings=tuple(getattr(preparer, "last_enrichment_warnings", ())),
+                    source_warnings=tuple(getattr(preparer, "last_source_warnings", ())),
+                    source_inventory=dict(getattr(preparer, "last_source_inventory", {}) or {}),
+                    source_metrics=dict(getattr(preparer, "last_source_metrics", {}) or {}),
                 )
             results.append(result)
             self._emit(

@@ -85,6 +85,10 @@ def test_required_runtime_ai_modules_are_importable():
 def test_preparer_returns_one_zip_without_legacy_output(tmp_path: Path):
     course_root = tmp_path / "Course"
     course_root.mkdir()
+    (course_root / "notes.txt").write_text(
+        "Teaching notes explain the course concepts and include a worked example.",
+        encoding="utf-8",
+    )
     legacy = course_root / "AI_Knowledge"
     legacy.mkdir()
     sentinel = legacy / "user-owned.txt"

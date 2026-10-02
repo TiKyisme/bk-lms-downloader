@@ -14,7 +14,13 @@ from pathlib import Path
 from threading import Event
 from typing import Callable, Iterable
 
-from .ai_study_pack import _included_pack_paths, validate_ai_study_pack, write_study_navigation
+from .ai_study_pack import (
+    _included_pack_paths,
+    calculate_study_pack_source_metrics,
+    study_pack_source_metrics,
+    validate_ai_study_pack,
+    write_study_navigation,
+)
 from .coursewave import CourseMatch, CoursewaveCandidate, CoursewaveClient, match_course
 from .exam_sources import CachedExam, DriveItem, ExamCache, ExamCandidate, GoogleDriveProvider, drive_id, sha256_file
 from .utils import safe_name
@@ -23,7 +29,7 @@ from .zip_safety import safe_extract_zip
 
 
 PACK_SCHEMA_VERSION = 1
-PROCESSING_FINGERPRINT = "bklms-study-pack-v1.3"
+PROCESSING_FINGERPRINT = "bklms-study-pack-v1.4-office-semantic"
 MAX_RETAINED_EXAMS = 4
 MAX_EXAM_BINARY_BYTES = 15 * 1024 * 1024
 SKIP_DIRS = {"AI_Knowledge", ".git", "__MACOSX", "node_modules"}
@@ -67,7 +73,7 @@ class RefreshPlan:
 
     @property
     def requires_rebuild(self) -> bool:
-        return self.state in {"missing", "legacy", "dirty"}
+        return self.state in {"missing", "legacy", "dirty", "invalid"}
 
 
 @dataclass
@@ -114,6 +120,49 @@ def _read_zip_json(pack: Path, member: str) -> dict | None:
         return None
 
 
+def _read_zip_jsonl(archive: zipfile.ZipFile, member: str) -> list[dict]:
+    try:
+        value = archive.read(member).decode("utf-8")
+    except (KeyError, UnicodeDecodeError):
+        return []
+    records: list[dict] = []
+    for line in value.splitlines():
+        if not line.strip():
+            continue
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError:
+            return []
+        if isinstance(item, dict):
+            records.append(item)
+    return records
+
+
+def _archive_semantic_metrics(pack: Path) -> dict:
+    with zipfile.ZipFile(pack) as archive:
+        names = {name.replace("\\", "/") for name in archive.namelist()}
+        records = _read_zip_jsonl(archive, "meta/documents.jsonl")
+        chunks = _read_zip_jsonl(archive, "meta/corpus.jsonl")
+        try:
+            visuals = json.loads(archive.read("meta/visual_manifest.json").decode("utf-8"))
+        except (KeyError, UnicodeDecodeError, json.JSONDecodeError):
+            visuals = []
+        if not isinstance(visuals, list):
+            visuals = []
+
+    def member_exists(relative_path: str) -> bool:
+        normalized = relative_path.replace("\\", "/")
+        parts = Path(normalized).parts
+        return bool(
+            normalized
+            and not Path(normalized).is_absolute()
+            and ".." not in parts
+            and normalized in names
+        )
+
+    return calculate_study_pack_source_metrics(records, chunks, visuals, member_exists)
+
+
 def exam_extraction_status(path: Path) -> str:
     if Path(path).suffix.lower() != ".pdf":
         return "visual_unparsed"
@@ -132,7 +181,15 @@ def plan_refresh(existing_pack: Path | None, source_root: Path) -> RefreshPlan:
         return RefreshPlan("missing", new_sources=tuple(sorted(current)))
     manifest = _read_zip_json(Path(existing_pack), "meta/pack_manifest.json")
     source_manifest = _read_zip_json(Path(existing_pack), "meta/source_manifest.json")
-    if not manifest or not source_manifest or manifest.get("processing_fingerprint") != PROCESSING_FINGERPRINT:
+    if not manifest or not source_manifest:
+        return RefreshPlan("legacy", new_sources=tuple(sorted(current)))
+    try:
+        semantic_metrics = _archive_semantic_metrics(Path(existing_pack))
+    except (OSError, zipfile.BadZipFile, ValueError):
+        return RefreshPlan("invalid", new_sources=tuple(sorted(current)))
+    if not semantic_metrics.get("viable"):
+        return RefreshPlan("invalid", new_sources=tuple(sorted(current)))
+    if manifest.get("processing_fingerprint") != PROCESSING_FINGERPRINT:
         return RefreshPlan("legacy", new_sources=tuple(sorted(current)))
     prior = {
         str(item.get("logical_path", "")): str(item.get("sha256", ""))
@@ -203,7 +260,11 @@ class CoursewaveEnricher:
             match = match_course(course_code=course_code, course_name=course_name, courses=catalog_result.courses)
             result.match = match
             if match.status in {"none", "no_match"}:
-                result.warnings.append(match.reason)
+                course_label = course_code or course_name or "course"
+                result.warnings.append(
+                    f"Kh\u00f4ng t\u00ecm th\u1ea5y {course_label} tr\u00ean Coursewave; "
+                    "Study Pack v\u1eabn d\u00f9ng t\u00e0i li\u1ec7u BK-LMS."
+                )
                 result.stage = "no_match"
                 return result
             if match.status == "ambiguous":
@@ -373,6 +434,19 @@ class StudyPackRefresher:
             snapshots = snapshot_sources(source_root)
             records = _read_jsonl(workspace / "meta" / "documents.jsonl")
             chunks = _read_jsonl(workspace / "meta" / "corpus.jsonl")
+            try:
+                visual_sources = json.loads((workspace / "meta" / "visual_manifest.json").read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                visual_sources = []
+            if not isinstance(visual_sources, list):
+                visual_sources = []
+            source_metrics = study_pack_source_metrics(workspace, records, chunks, visual_sources)
+            if not source_metrics["viable"]:
+                raise RuntimeError("No usable course teaching sources were included.")
+            try:
+                source_inventory = json.loads((workspace / "meta" / "source_inventory.json").read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                source_inventory = {}
             navigation_exams = [asdict(item) for item in exam_entries] if not preserve_existing_exams else list((preserved_exam_manifest or {}).get("exams", []))
             write_study_navigation(workspace, course_name, records, chunks, exams=navigation_exams)
             _write_json(workspace / "meta" / "source_manifest.json", {"schema_version": 1, "sources": [asdict(item) for item in snapshots.values()]})
@@ -418,6 +492,8 @@ class StudyPackRefresher:
                     "generated_at": datetime.now(timezone.utc).isoformat(),
                     "course": {"code": course_code, "name": course_name},
                     "refresh": asdict(plan),
+                    "source_inventory": source_inventory,
+                    "source_metrics": source_metrics,
                     "coursewave": {
                         "enabled": enrichment is not None,
                         "match": asdict(enrichment.match) if enrichment and enrichment.match else None,
