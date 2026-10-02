@@ -26,6 +26,7 @@ from .course_discovery import (
     SessionExpiredError,
     discover_courses_with_browser_fallback,
 )
+from .course_roots import CourseRootResolutionError, resolve_course_root
 from .course_store import CourseStore
 from .coursewave import CourseMatch, CoursewaveCandidate
 from .feedback import FeedbackDialog, current_platform_label
@@ -45,7 +46,7 @@ from .sync_progress import (
 from .ui_icons import icon
 from .ui_theme import THEME
 from .update_checker import UpdateChecker, UpdateInfo
-from .utils import is_course_url, safe_name
+from .utils import is_course_url
 
 
 LOG = get_logger(__name__)
@@ -1608,9 +1609,11 @@ class App(ctk.CTk):
         course = self._selected_course()
         if course is None:
             return
-        output = course.output_path
-        named_output = output / safe_name(course.name, 150) if course.name else output
-        path = named_output if named_output.exists() else output
+        try:
+            path = resolve_course_root(course)
+        except CourseRootResolutionError as exc:
+            messagebox.showwarning("Course folder", str(exc), parent=self)
+            return
         if not path.exists():
             messagebox.showwarning("Thư mục", "Chưa tìm thấy thư mục kết quả.", parent=self)
             return
@@ -1755,9 +1758,7 @@ class App(ctk.CTk):
         )
 
     def _course_root(self, course: Course) -> Path:
-        output = course.output_path
-        named_output = output / safe_name(course.name, 150) if course.name else output
-        return named_output if named_output.exists() else output
+        return resolve_course_root(course)
 
     def _prepare_checked_courses_for_ai(self) -> None:
         if self.syncing:
@@ -2312,10 +2313,12 @@ class App(ctk.CTk):
                     0.0,
                     completed_courses=self._progress_completed_courses,
                 )
-                action = "cập nhật lại" if result.refresh_state in {"dirty", "legacy"} else "đã sẵn sàng"
+                action = "cập nhật lại" if result.refresh_state in {"dirty", "legacy", "invalid"} else "đã sẵn sàng"
                 self._log(f"[AI][DONE] {result.course.display_name} — {action}{self._format_pack_size(result.output)}")
                 for warning in result.warnings:
                     self._log(f"[COURSEWAVE][SKIP] {warning}")
+                for warning in result.source_warnings:
+                    self._log(f"[AI][WARN] {warning}")
             else:
                 self._log(
                     f"[AI][ERROR] {result.course.code or '-'}: {result.error or 'Unknown error'}"
@@ -2419,6 +2422,7 @@ class App(ctk.CTk):
         total = self.__dict__.get("_progress_total_courses", len(batch.results))
         succeeded = batch.succeeded
         failed = batch.failed
+        warning_courses = sum(result.succeeded_with_warnings for result in succeeded)
         self._progress_completed_courses = min(total, len(succeeded))
         fully_successful = bool(total) and not batch.cancelled and not failed and len(succeeded) == total
         self._set_batch_progress_target(
@@ -2427,9 +2431,11 @@ class App(ctk.CTk):
             terminal=fully_successful,
         )
         self.current_course_var.set("Sẵn sàng đồng bộ")
-        self._set_summary_message(
-            f"AI: {len(succeeded)} course thành công • {len(failed)} course thất bại"
-        )
+        summary = f"AI: {len(succeeded)} course th\u00e0nh c\u00f4ng"
+        if warning_courses:
+            summary += f" \u2022 {warning_courses} course c\u00f3 c\u1ea3nh b\u00e1o"
+        summary += f" \u2022 {len(failed)} course th\u1ea5t b\u1ea1i"
+        self._set_summary_message(summary)
 
         if self.__dict__.get("_close_requested", False):
             self.current_course_var.set("Đang đóng ứng dụng...")
@@ -2448,6 +2454,20 @@ class App(ctk.CTk):
                 self._refresh_course_row(result.course.id)
             except OSError:
                 LOG.warning("Could not persist Study Pack status for %s", result.course.id)
+
+        for result in failed:
+            current = self.store.get(result.course.id)
+            if current is None or not current.study_pack_path:
+                continue
+            try:
+                self.store.update_study_pack(
+                    current.id,
+                    path=current.study_pack_path,
+                    status="dirty",
+                )
+                self._refresh_course_row(current.id)
+            except OSError:
+                LOG.warning("Could not mark failed Study Pack refresh as dirty for %s", current.id)
 
         if batch.cancelled:
             packs = [str(result.output) for result in succeeded if result.output is not None]
@@ -2468,10 +2488,15 @@ class App(ctk.CTk):
                 "\n\nNếu bạn đang dùng file này trong một cuộc trò chuyện ChatGPT cũ, hãy tải lại file ZIP mới để AI nhận tài liệu vừa cập nhật."
             )
             location = "\n\n" + "\n".join(f"- {pack}" for pack in pack_lines) if pack_lines else ""
+            warning_text = (
+                f"\n\n{warning_courses} course c\u00f3 c\u1ea3nh b\u00e1o. "
+                "Xem Ho\u1ea1t \u0111\u1ed9ng g\u1ea7n \u0111\xe2y."
+                if warning_courses else ""
+            )
             messagebox.showinfo(
                 "Chuẩn bị cho AI",
                 f"Đã chuẩn bị {len(succeeded)}/{total} course cho AI."
-                f"{location}{next_step}",
+                f"{location}{warning_text}{next_step}",
                 parent=self,
             )
             return

@@ -13,6 +13,9 @@ Hỗ trợ:
 - content.txt / content.html (ưu tiên TXT, tránh duplicate HTML).
 - PDF lecture: extract theo page.
 - PPTX: extract theo slide.
+- DOCX: extract paragraphs, headings, and tables; retain the original.
+- XLSX/XLSM: extract sheets, rows, values, and formula text without evaluation.
+- CSV: extract rows with tolerant encoding detection.
 - Video/audio: optional transcript bằng faster-whisper.
 - .srt/.vtt: đưa transcript có sẵn vào corpus.
 - .url: đưa vào links index, không feed làm knowledge text.
@@ -39,6 +42,7 @@ import argparse
 import csv
 import hashlib
 import html
+import io
 import json
 import os
 import re
@@ -49,9 +53,11 @@ import textwrap
 import unicodedata
 import zipfile
 from collections import Counter, defaultdict
+from contextlib import redirect_stdout
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Iterable, Optional
 
 
@@ -60,11 +66,37 @@ if _PROJECT_SRC.is_dir() and str(_PROJECT_SRC) not in sys.path:
     sys.path.insert(0, str(_PROJECT_SRC))
 
 from bklms_downloader.ai_study_pack import (
+    calculate_study_pack_source_metrics,
     create_chatgpt_study_pack,
     validate_ai_study_pack,
     write_study_navigation,
 )
-from bklms_downloader.study_pack_refresh import RefreshPlan, StudyPackRefresher, snapshot_sources
+from bklms_downloader.ai_sources import (
+    AUDIO_EXTS,
+    CSV_EXTS,
+    HTML_EXTS,
+    JSON_EXTS,
+    PDF_EXTS,
+    PPT_EXTS,
+    SKIP_DIR_NAMES,
+    SPREADSHEET_EXTS,
+    STUDY_PACK_SUFFIXES,
+    SUBTITLE_EXTS,
+    TEXT_EXTS,
+    URL_EXTS,
+    VIDEO_EXTS,
+    WORD_EXTS,
+    inventory_course_sources,
+    is_downloader_metadata,
+    iter_course_source_files,
+    safe_relative_diagnostic_path,
+)
+from bklms_downloader.study_pack_refresh import (
+    PROCESSING_FINGERPRINT,
+    RefreshPlan,
+    StudyPackRefresher,
+    snapshot_sources,
+)
 from bklms_downloader.zip_safety import safe_extract_zip
 from bklms_downloader.lite_retention import optimize_workspace
 
@@ -72,27 +104,6 @@ from bklms_downloader.lite_retention import optimize_workspace
 # -----------------------------------------------------------------------------
 # Constants
 # -----------------------------------------------------------------------------
-
-TEXT_EXTS = {".txt", ".md"}
-HTML_EXTS = {".html", ".htm"}
-PDF_EXTS = {".pdf"}
-PPT_EXTS = {".pptx"}
-VIDEO_EXTS = {".mp4", ".mkv", ".webm", ".mov", ".avi"}
-AUDIO_EXTS = {".mp3", ".m4a", ".wav", ".aac", ".flac", ".ogg"}
-SUBTITLE_EXTS = {".srt", ".vtt"}
-URL_EXTS = {".url"}
-JSON_EXTS = {".json"}
-
-SKIP_DIR_NAMES = {
-    "AI_Knowledge",
-    "__MACOSX",
-    ".git",
-    ".idea",
-    ".vscode",
-    "node_modules",
-    "duylms_forum_debug",
-}
-STUDY_PACK_SUFFIXES = (" - AI Study Pack.zip", "_AI_Study_Pack.zip")
 
 REFERENCE_HINTS = (
     "textbook",
@@ -125,6 +136,9 @@ COURSE_META_HINTS = (
 SOURCE_PRIORITY = {
     "lms_page": 1,
     "lms_text": 1,
+    "word_document": 1,
+    "spreadsheet": 1,
+    "csv_table": 1,
     "slide": 2,
     "lecture_pdf": 2,
     "subtitle": 3,
@@ -184,6 +198,20 @@ class PreparationCancelled(RuntimeError):
 # -----------------------------------------------------------------------------
 # Generic helpers
 # -----------------------------------------------------------------------------
+
+def safe_error_detail(exc: Exception, source_root: Path) -> str:
+    """Keep diagnostics useful without serializing local paths or credentials."""
+    detail = str(exc)
+    root_text = str(Path(source_root).resolve())
+    if root_text:
+        detail = detail.replace(root_text, "[course]")
+    detail = re.sub(r"(?i)(authorization|proxy-authorization)\s*[:=]\s*(?:bearer|basic)\s+\S+", r"\1=[redacted]", detail)
+    detail = re.sub(r"(?i)\b(cookie|set-cookie|token|sessionid|sesskey)\s*[:=]\s*\S+", r"\1=[redacted]", detail)
+    detail = re.sub(r"https?://[^\s?#]+(?:\?[^\s#]*)?(?:#[^\s]*)?", lambda match: match.group(0).split("?", 1)[0].split("#", 1)[0], detail, flags=re.IGNORECASE)
+    detail = re.sub(r"(?i)\b[A-Z]:[\\/][^\s\"'<>)]*", "[local path]", detail)
+    detail = re.sub(r"(?i)/(?:Users|home)/[^\s\"'<>)]*", "[local path]", detail)
+    return f"{type(exc).__name__}: {detail[:240]}"
+
 
 def clean_text(value: str) -> str:
     value = (value or "").replace("\xa0", " ")
@@ -373,15 +401,7 @@ def prepare_input(input_path: Path, work_dir: Path) -> tuple[Path, Optional[Path
 
 
 def iter_source_files(root: Path) -> list[Path]:
-    results: list[Path] = []
-    for directory, subdirectories, filenames in os.walk(root):
-        # Prune generated output BEFORE traversing thousands of old chunks.
-        subdirectories[:] = [name for name in subdirectories if name not in SKIP_DIR_NAMES]
-        for filename in filenames:
-            path = Path(directory) / filename
-            if path.is_file() and not any(filename.endswith(suffix) for suffix in STUDY_PACK_SUFFIXES):
-                results.append(path)
-    return sorted(results, key=lambda p: p.as_posix().lower())
+    return iter_course_source_files(root)
 
 
 # -----------------------------------------------------------------------------
@@ -498,6 +518,181 @@ def extract_pptx(path: Path) -> tuple[str, list[tuple[str, str]]]:
         pieces.append(f"## Slide {idx}\n\n{text}")
 
     return "\n\n".join(pieces), units
+
+
+def extract_docx(path: Path) -> tuple[str, list[tuple[str, str]], bool]:
+    """Extract ordered paragraphs/headings/tables and report retained visual parts."""
+    try:
+        from docx import Document
+        from docx.table import Table
+        from docx.text.paragraph import Paragraph
+    except ImportError as exc:
+        raise RuntimeError("Missing python-docx; install the AI source dependencies.") from exc
+
+    document = Document(path)
+    visual_parts = False
+    try:
+        visual_parts = bool(document.inline_shapes)
+    except Exception:
+        pass
+    if not visual_parts:
+        visual_parts = _office_has_visual_parts(path, ("word/media/", "word/charts/", "word/diagrams/"))
+
+    pieces: list[str] = []
+    units: list[tuple[str, str]] = []
+    paragraph_index = 0
+    table_index = 0
+    current_heading = ""
+    for block in document.element.body.iterchildren():
+        if block.tag.endswith("}p"):
+            paragraph_index += 1
+            paragraph = Paragraph(block, document)
+            text = clean_text(paragraph.text)
+            if not text:
+                continue
+            try:
+                style_name = paragraph.style.name or ""
+            except Exception:
+                style_name = ""
+            heading_match = re.match(r"(?i)^heading\s+(\d+)$", style_name.strip())
+            if heading_match:
+                level = max(1, min(6, int(heading_match.group(1))))
+                current_heading = text
+                rendered = f"{'#' * (level + 1)} {text}"
+            elif style_name.casefold() == "title":
+                current_heading = text
+                rendered = f"## {text}"
+            else:
+                rendered = text
+            locator = f"paragraph {paragraph_index}"
+            if current_heading and current_heading != text:
+                locator = f"{current_heading} / {locator}"
+            pieces.append(rendered)
+            units.append((locator, text))
+        elif block.tag.endswith("}tbl"):
+            table_index += 1
+            table = Table(block, document)
+            nonempty_rows: list[tuple[int, list[str]]] = []
+            for row_index, row in enumerate(table.rows, start=1):
+                cells = [clean_text(cell.text) for cell in row.cells]
+                if any(cells):
+                    nonempty_rows.append((row_index, cells))
+            if not nonempty_rows:
+                continue
+            pieces.append(f"### Table {table_index}")
+            first_row_index, first_cells = nonempty_rows[0]
+            pieces.append("| " + " | ".join(cell or " " for cell in first_cells) + " |")
+            pieces.append("| " + " | ".join("---" for _ in first_cells) + " |")
+            for row_index, cells in nonempty_rows[1:]:
+                pieces.append("| " + " | ".join(cell or " " for cell in cells) + " |")
+            for row_index, cells in nonempty_rows:
+                values = " | ".join(
+                    f"column {column_index}: {cell}"
+                    for column_index, cell in enumerate(cells, start=1)
+                    if cell
+                )
+                units.append((f"table {table_index} row {row_index}", values))
+    return "\n\n".join(pieces), units, visual_parts
+
+
+def _office_has_visual_parts(path: Path, prefixes: tuple[str, ...]) -> bool:
+    """Inspect Office container entry names only; never extract nested archives."""
+    try:
+        with zipfile.ZipFile(path) as archive:
+            return any(name.startswith(prefixes) for name in archive.namelist())
+    except (OSError, zipfile.BadZipFile):
+        return False
+
+
+def _spreadsheet_cell_text(value: object) -> str:
+    if value is None:
+        return ""
+    if hasattr(value, "isoformat"):
+        try:
+            return clean_text(value.isoformat())
+        except (TypeError, ValueError):
+            pass
+    return clean_text(str(value))
+
+
+def extract_spreadsheet(path: Path) -> tuple[str, list[tuple[str, str]]]:
+    """Extract worksheet names and non-empty rows without evaluating formulas."""
+    try:
+        from openpyxl import load_workbook
+    except ImportError as exc:
+        raise RuntimeError("Missing openpyxl; install the AI source dependencies.") from exc
+
+    workbook = load_workbook(path, read_only=True, data_only=False, keep_links=False)
+    pieces: list[str] = []
+    units: list[tuple[str, str]] = []
+    max_rows = 20000
+    max_columns = 256
+    try:
+        for worksheet in workbook.worksheets:
+            nonempty_rows = 0
+            sheet_pieces: list[str] = []
+            for row_index, row in enumerate(
+                worksheet.iter_rows(max_row=max_rows, max_col=max_columns),
+                start=1,
+            ):
+                values: list[str] = []
+                for cell in row:
+                    value = _spreadsheet_cell_text(cell.value)
+                    if value:
+                        values.append(f"{cell.coordinate}: {value}")
+                if not values:
+                    continue
+                nonempty_rows += 1
+                row_text = " | ".join(values)
+                sheet_pieces.append(f"Row {row_index}: {row_text}")
+                units.append((f"sheet {worksheet.title} / row {row_index}", row_text))
+            if nonempty_rows:
+                pieces.append(f"## Sheet: {clean_text(worksheet.title)}")
+                pieces.extend(sheet_pieces)
+                if worksheet.max_row and worksheet.max_row > max_rows:
+                    pieces.append(f"_Extraction limited to the first {max_rows} rows on this sheet; the original workbook is retained._")
+    finally:
+        workbook.close()
+    return "\n\n".join(pieces), units
+
+
+def extract_csv(path: Path) -> tuple[str, list[tuple[str, str]]]:
+    """Read CSV with tolerant encodings and preserve row locators."""
+    last_decode_error: UnicodeDecodeError | None = None
+    for encoding in ("utf-8-sig", "cp1258", "cp1252", "latin-1"):
+        try:
+            with path.open("r", encoding=encoding, newline="") as handle:
+                sample = handle.read(8192)
+                handle.seek(0)
+                try:
+                    dialect = csv.Sniffer().sniff(sample, delimiters=",;\t|")
+                except csv.Error:
+                    dialect = csv.excel
+                rows = csv.reader(handle, dialect)
+                pieces: list[str] = []
+                units: list[tuple[str, str]] = []
+                max_rows = 50000
+                for row_index, row in enumerate(rows, start=1):
+                    if row_index > max_rows:
+                        pieces.append(f"_Extraction limited to the first {max_rows} rows; the original CSV is retained._")
+                        break
+                    values = [clean_text(value) for value in row]
+                    if not any(values):
+                        continue
+                    rendered = " | ".join(
+                        f"column {column_index}: {value}"
+                        for column_index, value in enumerate(values, start=1)
+                        if value
+                    )
+                    pieces.append(f"Row {row_index}: {rendered}")
+                    units.append((f"row {row_index}", rendered))
+                return "\n\n".join(pieces), units
+        except UnicodeDecodeError as exc:
+            last_decode_error = exc
+            continue
+    if last_decode_error:
+        raise last_decode_error
+    return "", []
 
 
 def parse_subtitle(path: Path) -> tuple[str, list[tuple[str, str]]]:
@@ -788,6 +983,10 @@ class CoursePreparer:
         self.transcription_queue: list[dict] = []
         self.errors: list[dict] = []
         self.visual_sources: list[dict] = []
+        self.source_inventory = (
+            getattr(args, "source_inventory", None)
+            or inventory_course_sources(source_root).to_dict()
+        )
         self.seen_content_hashes: dict[str, str] = {}
         self.whisper_model_cache: dict = {}
 
@@ -886,7 +1085,7 @@ class CoursePreparer:
 
     def retain_visual_source(self, path: Path, source_id: str, source_type: str) -> Optional[str]:
         """Keep original lecturer visuals available without treating text as visual truth."""
-        if source_type not in {"lecture_pdf", "slide"}:
+        if source_type not in {"lecture_pdf", "slide", "word_document", "spreadsheet"}:
             return None
         destination = self.sources_dir / f"{source_id}__{safe_name(path.name, 150)}"
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -1115,6 +1314,71 @@ class CoursePreparer:
         body, units = extract_pptx(path)
         self.add_text_document(path, "slide", body, units)
 
+    def add_visual_only_source(self, path: Path, source_type: str, note: str) -> None:
+        group, chapter = classify_group(path)
+        source_path = rel(path, self.source_root)
+        source_id = source_id_for(path, self.source_root, source_type)
+        self.register_record(
+            DocumentRecord(
+                source_id=source_id,
+                title=infer_title(path),
+                source_path=source_path,
+                source_type=source_type,
+                priority=SOURCE_PRIORITY.get(source_type, 2),
+                group=group,
+                chapter=chapter,
+                output_path=None,
+                status="visual_only",
+                note=note,
+                source_copy_path=self.retain_visual_source(path, source_id, source_type),
+            )
+        )
+
+    def process_docx(self, path: Path) -> None:
+        body, units, has_visual = extract_docx(path)
+        if body:
+            self.add_text_document(
+                path,
+                "word_document",
+                body,
+                units,
+                note="Paragraphs, headings and tables extracted; original retained.",
+            )
+        elif has_visual:
+            self.add_visual_only_source(
+                path,
+                "word_document",
+                "No text extracted; original document retained for visual evidence.",
+            )
+        else:
+            self.add_text_document(path, "word_document", "", units)
+
+    def process_spreadsheet(self, path: Path) -> None:
+        body, units = extract_spreadsheet(path)
+        has_visual = not body and _office_has_visual_parts(
+            path, ("xl/charts/", "xl/drawings/", "xl/media/")
+        )
+        if body:
+            self.add_text_document(
+                path,
+                "spreadsheet",
+                body,
+                units,
+                note="Sheet names, cell values and formulas extracted without evaluation; original retained.",
+            )
+        elif has_visual:
+            self.add_visual_only_source(
+                path,
+                "spreadsheet",
+                "No cell text extracted; original workbook retained for chart/visual evidence.",
+            )
+        else:
+            self.add_text_document(path, "spreadsheet", "", units)
+
+    def process_csv(self, path: Path) -> None:
+        body, units = extract_csv(path)
+        self.add_text_document(path, "csv_table", body, units)
+
     def process_subtitle(self, path: Path) -> None:
         body, units = parse_subtitle(path)
         self.add_text_document(path, "subtitle", body, units)
@@ -1185,7 +1449,7 @@ class CoursePreparer:
         )
 
     def process_json_metadata(self, path: Path) -> None:
-        if path.name not in {"_course_structure.json", "_stats.json", "_download_manifest.json"}:
+        if not is_downloader_metadata(path, self.source_root):
             self.process_unhandled(path)
             return
         try:
@@ -1251,16 +1515,18 @@ class CoursePreparer:
                 rank = 1
             elif ext in HTML_EXTS:
                 rank = 2
-            elif ext in PPT_EXTS:
+            elif ext in WORD_EXTS | SPREADSHEET_EXTS | CSV_EXTS:
                 rank = 3
-            elif ext in PDF_EXTS:
+            elif ext in PPT_EXTS:
                 rank = 4
-            elif ext in SUBTITLE_EXTS:
+            elif ext in PDF_EXTS:
                 rank = 5
-            elif ext in VIDEO_EXTS | AUDIO_EXTS:
+            elif ext in SUBTITLE_EXTS:
                 rank = 6
-            elif ext in URL_EXTS:
+            elif ext in VIDEO_EXTS | AUDIO_EXTS:
                 rank = 7
+            elif ext in URL_EXTS:
+                rank = 8
             else:
                 rank = 9
             return (rank, p.as_posix().lower())
@@ -1293,6 +1559,12 @@ class CoursePreparer:
                     self.process_pdf(path)
                 elif ext in PPT_EXTS:
                     self.process_pptx(path)
+                elif ext in WORD_EXTS:
+                    self.process_docx(path)
+                elif ext in SPREADSHEET_EXTS:
+                    self.process_spreadsheet(path)
+                elif ext in CSV_EXTS:
+                    self.process_csv(path)
                 elif ext in SUBTITLE_EXTS:
                     self.process_subtitle(path)
                 elif ext in VIDEO_EXTS | AUDIO_EXTS:
@@ -1302,8 +1574,9 @@ class CoursePreparer:
                 else:
                     self.process_unhandled(path)
             except Exception as exc:
-                print(f"        [WARN] {exc}")
-                self.errors.append({"source_path": source_path, "error": str(exc)})
+                safe_error = safe_error_detail(exc, self.source_root)
+                print(f"        [WARN] {safe_error}")
+                self.errors.append({"source_path": source_path, "error": safe_error})
                 group, chapter = classify_group(path)
                 sid = source_id_for(path, self.source_root, "other")
                 self.register_record(
@@ -1317,7 +1590,7 @@ class CoursePreparer:
                         chapter=chapter,
                         output_path=None,
                         status="error",
-                        note=str(exc),
+                        note=safe_error,
                     )
                 )
             self._emit_progress(
@@ -1345,6 +1618,34 @@ class CoursePreparer:
 
     def write_manifests(self) -> None:
         self.meta_dir.mkdir(parents=True, exist_ok=True)
+        (self.meta_dir / "source_inventory.json").write_text(
+            json.dumps(self.source_inventory, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+        metric_records = [asdict(record) for record in self.records]
+        metric_chunks = []
+        for chunk in self.chunks:
+            item = asdict(chunk)
+            try:
+                item["chunk_path"] = rel(Path(chunk.chunk_path), self.output_root)
+            except (OSError, ValueError):
+                item["chunk_path"] = ""
+            metric_chunks.append(item)
+        output_root = self.output_root.resolve()
+
+        def pack_file_exists(relative_path: str) -> bool:
+            if not relative_path:
+                return False
+            candidate = (output_root / relative_path).resolve()
+            return candidate != output_root and output_root in candidate.parents and candidate.is_file()
+
+        source_metrics = calculate_study_pack_source_metrics(
+            metric_records,
+            metric_chunks,
+            self.visual_sources,
+            pack_file_exists,
+        )
 
         with (self.meta_dir / "documents.jsonl").open("w", encoding="utf-8") as f:
             for r in self.records:
@@ -1381,6 +1682,8 @@ class CoursePreparer:
             "media_pending_transcription": len(self.transcription_queue),
             "links": len(self.links),
             "errors": len(self.errors),
+            "source_inventory": self.source_inventory,
+            "source_metrics": source_metrics,
             "source_types": dict(Counter(r.source_type for r in self.records)),
             "statuses": dict(Counter(r.status for r in self.records)),
             "chapter_groups": sorted({r.group for r in self.records if r.group.startswith("chapter_")}),
@@ -1403,6 +1706,21 @@ class CoursePreparer:
             records,
             [asdict(chunk) for chunk in self.chunks],
         )
+        pack_manifest_path = self.meta_dir / "pack_manifest.json"
+        if pack_manifest_path.is_file():
+            try:
+                pack_manifest = json.loads(pack_manifest_path.read_text(encoding="utf-8"))
+                stats = json.loads((self.meta_dir / "stats.json").read_text(encoding="utf-8"))
+                if isinstance(pack_manifest, dict):
+                    pack_manifest["processing_fingerprint"] = PROCESSING_FINGERPRINT
+                    pack_manifest["source_inventory"] = self.source_inventory
+                    pack_manifest["source_metrics"] = stats.get("source_metrics", {})
+                    pack_manifest_path.write_text(
+                        json.dumps(pack_manifest, ensure_ascii=False, indent=2) + "\n",
+                        encoding="utf-8",
+                    )
+            except (OSError, json.JSONDecodeError):
+                pass
         self._emit_progress("validation", 0.92, "Đang kiểm tra Study Pack...")
         validation = validate_ai_study_pack(self.output_root)
         if validation.errors:
@@ -1528,6 +1846,7 @@ def run_preparation(args) -> Path:
     with tempfile.TemporaryDirectory(prefix="prepare_ai_course_") as tmp:
         work_dir = Path(tmp)
         source_root, _ = prepare_input(args.input, work_dir)
+        args.source_inventory = inventory_course_sources(source_root).to_dict()
         output_root = work_dir / "study_pack"
         existing_pack = getattr(args, "incremental_existing_pack", None)
         reuse_paths = set(getattr(args, "incremental_reuse_paths", ()) or ())
@@ -1569,6 +1888,137 @@ def run_preparation(args) -> Path:
     print("=" * 78)
     print(f"AI Study Pack: {pack_path}")
     return pack_path
+
+
+def diagnose_course_directory(input_path: Path) -> dict:
+    """Run a private source pass and return only safe counts/relative filenames."""
+    from bklms_downloader import __version__
+
+    report = {
+        "app_version": __version__,
+        "source_inventory": {},
+        "resolved_root_status": "unresolved",
+        "ready_source_count": 0,
+        "chunk_count": 0,
+        "retained_lecturer_source_count": 0,
+        "source_error_count": 0,
+        "unsupported_source_count": 0,
+        "failed_relative_files": [],
+        "failure_phase": None,
+        "failure_reason": None,
+    }
+    supplied = Path(input_path).expanduser().resolve()
+    if not supplied.is_dir():
+        report["resolved_root_status"] = "missing"
+        report["failure_phase"] = "root_resolution"
+        report["failure_reason"] = "The supplied course folder does not exist."
+        return report
+
+    own_metadata = supplied / "_meta" / "course_structure.json"
+    if own_metadata.is_file():
+        source_root = supplied
+        root_status = "resolved_metadata"
+    else:
+        child_roots = [
+            child for child in supplied.iterdir()
+            if child.is_dir() and not child.is_symlink()
+            and (child / "_meta" / "course_structure.json").is_file()
+        ]
+        if len(child_roots) > 1:
+            report["resolved_root_status"] = "ambiguous_multiple_courses"
+            report["failure_phase"] = "root_resolution"
+            report["failure_reason"] = "Multiple course folders were found; pass one course folder, not their shared parent."
+            return report
+        if len(child_roots) == 1:
+            source_root = child_roots[0]
+            root_status = "resolved_metadata_child"
+        else:
+            source_root = supplied
+            root_status = "resolved_legacy_explicit_folder"
+
+    inventory = inventory_course_sources(source_root)
+    report["resolved_root_status"] = root_status
+    report["source_inventory"] = inventory.to_dict()
+    if inventory.lecturer_material_candidates == 0:
+        report["failure_phase"] = "source_inventory"
+        if inventory.unsupported_relative_paths:
+            report["failure_reason"] = "No supported lecturer source was found; see unsupported extension counts."
+        else:
+            report["failure_reason"] = "No lecturer teaching material was found in this course folder."
+        report["unsupported_source_count"] = inventory.unsupported_files
+        report["failed_relative_files"] = list(inventory.unsupported_relative_paths)
+        return report
+
+    with tempfile.TemporaryDirectory(prefix="bklms_ai_diagnostic_") as temporary:
+        workspace = (Path(temporary) / "pack").resolve()
+        args = SimpleNamespace(
+            input=source_root,
+            output=Path(temporary),
+            archive_destination=Path(temporary) / "diagnostic.zip",
+            course_name=source_root.name,
+            source_inventory=inventory.to_dict(),
+            progress_callback=None,
+            cancel_event=None,
+            include_references=False,
+            transcribe=False,
+            whisper_model="small",
+            language=None,
+            whisper_device="cpu",
+            whisper_compute_type="int8",
+            chunk_chars=4800,
+            chunk_overlap=500,
+            force=True,
+        )
+        preparer = CoursePreparer(args, source_root, workspace)
+        try:
+            with redirect_stdout(io.StringIO()):
+                preparer.process()
+        except Exception as exc:
+            if "No usable course teaching sources were included" in str(exc):
+                report["failure_phase"] = "semantic_validation"
+                report["failure_reason"] = "No usable course teaching sources were extracted."
+            else:
+                report["failure_phase"] = "source_processing"
+                report["failure_reason"] = f"The local source-processing pass failed ({type(exc).__name__})."
+
+        records = [asdict(item) for item in preparer.records]
+        chunks = []
+        for chunk in preparer.chunks:
+            record = asdict(chunk)
+            try:
+                record["chunk_path"] = rel(Path(chunk.chunk_path), workspace)
+            except (OSError, ValueError):
+                record["chunk_path"] = ""
+            chunks.append(record)
+
+        def file_exists(relative_path: str) -> bool:
+            relative = Path(relative_path)
+            if not relative_path or relative.is_absolute() or ".." in relative.parts:
+                return False
+            candidate = (workspace / relative).resolve()
+            return candidate != workspace and workspace in candidate.parents and candidate.is_file()
+
+        metrics = calculate_study_pack_source_metrics(
+            records,
+            chunks,
+            preparer.visual_sources,
+            file_exists,
+        )
+        report.update(metrics)
+        report["failed_relative_files"] = sorted(
+            {
+                safe_relative_diagnostic_path(str(item.get("source_path", "")))
+                for item in preparer.errors
+                if item.get("source_path")
+            }
+        )
+        if metrics["viable"]:
+            report["failure_phase"] = None
+            report["failure_reason"] = None
+        elif not report["failure_phase"]:
+            report["failure_phase"] = "semantic_validation"
+            report["failure_reason"] = "No usable course teaching sources were extracted."
+    return report
 
 
 def main():

@@ -8,7 +8,7 @@ import zipfile
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable
 
 
 NAVIGATION_FILES = (
@@ -19,7 +19,21 @@ NAVIGATION_FILES = (
     "04_COVERAGE_TRACKER.md",
     "05_RESUME_STATE.md",
 )
-VISUAL_SOURCE_TYPES = {"lecture_pdf", "slide"}
+VISUAL_SOURCE_TYPES = {"lecture_pdf", "slide", "word_document", "spreadsheet"}
+LECTURER_SOURCE_TYPES = {
+    "lms_page",
+    "lms_text",
+    "lecture_pdf",
+    "slide",
+    "reference_pdf",
+    "reference_text",
+    "word_document",
+    "spreadsheet",
+    "csv_table",
+    "subtitle",
+    "video_transcript",
+}
+MIN_MEANINGFUL_CHUNK_CHARS = 1
 _ABSOLUTE_PATH = re.compile(r"(?im)(?:\b[A-Z]:[\\/]|/(?:Users|home)/)")
 
 
@@ -27,6 +41,7 @@ _ABSOLUTE_PATH = re.compile(r"(?im)(?:\b[A-Z]:[\\/]|/(?:Users|home)/)")
 class AIStudyPackValidation:
     errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    metrics: dict = field(default_factory=dict)
 
     @property
     def valid(self) -> bool:
@@ -89,6 +104,83 @@ def _public_course_name(value: object) -> str:
 
 def _ready_records(records: Iterable[dict]) -> list[dict]:
     return [record for record in records if record.get("status") == "ready"]
+
+
+def calculate_study_pack_source_metrics(
+    records: list[dict],
+    chunks: list[dict],
+    visual_sources: list[dict],
+    file_exists: Callable[[str], bool],
+) -> dict:
+    """Measure useful lecturer evidence without allowing exams/metadata to qualify."""
+    lecturer_records = [
+        record for record in records
+        if record.get("source_type") in LECTURER_SOURCE_TYPES
+        and record.get("source_role", "course_material") != "past_exam"
+    ]
+    record_by_id = {
+        str(record.get("source_id", "")): record
+        for record in lecturer_records
+        if record.get("source_id")
+    }
+    ready_ids = {
+        str(record.get("source_id", ""))
+        for record in lecturer_records
+        if record.get("source_id")
+        and record.get("status") == "ready"
+        and record.get("output_path")
+        and file_exists(str(record.get("output_path")))
+    }
+    meaningful_chunk_source_ids: set[str] = set()
+    chunk_count = 0
+    for chunk in chunks:
+        source_id = str(chunk.get("source_id", ""))
+        text = str(chunk.get("text", "")).strip()
+        chunk_path = str(chunk.get("chunk_path", ""))
+        if (
+            source_id in ready_ids
+            and len(text) >= MIN_MEANINGFUL_CHUNK_CHARS
+            and chunk_path
+            and file_exists(chunk_path)
+        ):
+            chunk_count += 1
+            meaningful_chunk_source_ids.add(source_id)
+
+    visual_ids = {str(item.get("source_id", "")) for item in visual_sources if isinstance(item, dict)}
+    retained_ids: set[str] = set()
+    for source_id, record in record_by_id.items():
+        if record.get("source_type") not in VISUAL_SOURCE_TYPES:
+            continue
+        if record.get("status") not in {"ready", "visual_only"}:
+            continue
+        copy_path = str(record.get("source_copy_path") or "")
+        if source_id in visual_ids and copy_path and file_exists(copy_path):
+            retained_ids.add(source_id)
+
+    useful_ids = meaningful_chunk_source_ids | retained_ids
+    return {
+        "ready_source_count": len(ready_ids),
+        "chunk_count": chunk_count,
+        "retained_lecturer_source_count": len(retained_ids),
+        "source_error_count": sum(record.get("status") == "error" for record in records),
+        "unsupported_source_count": sum(record.get("status") == "skipped_unsupported" for record in records),
+        "meaningful_lecturer_source_count": len(useful_ids),
+        "viable": bool(useful_ids),
+    }
+
+
+def study_pack_source_metrics(root: Path, records: list[dict], chunks: list[dict], visual_sources: list[dict]) -> dict:
+    root = Path(root).resolve()
+
+    def file_exists(relative_path: str) -> bool:
+        if not relative_path or _is_absolute_metadata_path(relative_path):
+            return False
+        candidate = (root / relative_path).resolve()
+        if candidate != root and root not in candidate.parents:
+            return False
+        return candidate.is_file()
+
+    return calculate_study_pack_source_metrics(records, chunks, visual_sources, file_exists)
 
 
 def _potential_chapter_gaps(records: Iterable[dict]) -> list[int]:
@@ -448,6 +540,7 @@ def _included_pack_paths(root: Path) -> list[Path]:
         "corpus.jsonl",
         "stats.json",
         "visual_manifest.json",
+        "source_inventory.json",
         "study_pack_manifest.json",
         "pack_manifest.json",
         "source_manifest.json",
@@ -584,6 +677,24 @@ def validate_ai_study_pack(root: Path) -> AIStudyPackValidation:
                 report.errors.append(f"Tutor protocol missing rule: {phrase}")
     records = _read_jsonl(root / "meta" / "documents.jsonl", report)
     chunks = _read_jsonl(root / "meta" / "corpus.jsonl", report)
+    visual_path = root / "meta" / "visual_manifest.json"
+    visuals: list[dict] = []
+    if visual_path.is_file():
+        try:
+            loaded_visuals = json.loads(visual_path.read_text(encoding="utf-8"))
+            if isinstance(loaded_visuals, list):
+                visuals = [item for item in loaded_visuals if isinstance(item, dict)]
+            else:
+                report.errors.append("Malformed visual_manifest.json: expected a list")
+        except (OSError, json.JSONDecodeError):
+            report.errors.append("Malformed JSON: visual_manifest.json")
+    report.metrics = study_pack_source_metrics(root, records, chunks, visuals)
+    if not report.metrics["viable"]:
+        report.errors.append("No usable course teaching sources were included.")
+    if report.metrics["source_error_count"]:
+        report.warnings.append(f"{report.metrics['source_error_count']} source(s) could not be extracted")
+    if report.metrics["unsupported_source_count"]:
+        report.warnings.append(f"{report.metrics['unsupported_source_count']} unsupported source(s) were skipped")
     source_ids = {str(record.get("source_id", "")) for record in records}
     ready = _ready_records(records)
     coverage = (root / "04_COVERAGE_TRACKER.md").read_text(encoding="utf-8", errors="replace") if (root / "04_COVERAGE_TRACKER.md").is_file() else ""
@@ -599,7 +710,7 @@ def validate_ai_study_pack(root: Path) -> AIStudyPackValidation:
         output_path = record.get("output_path")
         if record.get("status") == "ready" and (not output_path or not (root / str(output_path)).is_file()):
             report.errors.append(f"Ready source document missing: {source_path}")
-        if record.get("source_type") in VISUAL_SOURCE_TYPES and record.get("status") == "ready":
+        if record.get("source_type") in VISUAL_SOURCE_TYPES and record.get("status") in {"ready", "visual_only"}:
             copy_path = record.get("source_copy_path")
             represented = record.get("represented_by_source_id")
             decision = record.get("retention_decision")
@@ -635,17 +746,66 @@ def validate_ai_study_pack(root: Path) -> AIStudyPackValidation:
             stats = json.loads(stats_path.read_text(encoding="utf-8"))
             if _is_absolute_metadata_path(stats.get("source_root")):
                 report.errors.append("Absolute source_root in stats.json")
+            inventory = stats.get("source_inventory") if isinstance(stats, dict) else None
+            if isinstance(inventory, dict):
+                for relative in inventory.get("unsupported_relative_paths", []):
+                    if _is_absolute_metadata_path(relative) or ".." in Path(str(relative)).parts:
+                        report.errors.append("Unsafe path in stats source_inventory")
+            recorded_metrics = stats.get("source_metrics") if isinstance(stats, dict) else None
+            if isinstance(recorded_metrics, dict):
+                for key in (
+                    "ready_source_count",
+                    "chunk_count",
+                    "retained_lecturer_source_count",
+                    "source_error_count",
+                    "unsupported_source_count",
+                    "meaningful_lecturer_source_count",
+                    "viable",
+                ):
+                    if recorded_metrics.get(key) != report.metrics.get(key):
+                        report.errors.append(f"Inconsistent source metric: {key}")
         except json.JSONDecodeError:
             report.errors.append("Malformed JSON: stats.json")
-    visual_path = root / "meta" / "visual_manifest.json"
-    if visual_path.is_file():
+    for item in visuals:
+        if any(_is_absolute_metadata_path(item.get(key)) for key in ("source_path", "copied_path")):
+            report.errors.append("Absolute path in visual_manifest.json")
+    inventory_path = root / "meta" / "source_inventory.json"
+    if inventory_path.is_file():
         try:
-            visuals = json.loads(visual_path.read_text(encoding="utf-8"))
-            for item in visuals if isinstance(visuals, list) else []:
-                if any(_is_absolute_metadata_path(item.get(key)) for key in ("source_path", "copied_path")):
-                    report.errors.append("Absolute path in visual_manifest.json")
-        except json.JSONDecodeError:
-            report.errors.append("Malformed JSON: visual_manifest.json")
+            inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
+            if not isinstance(inventory, dict):
+                report.errors.append("Malformed source_inventory.json")
+            else:
+                for relative in inventory.get("unsupported_relative_paths", []):
+                    if _is_absolute_metadata_path(relative) or ".." in Path(str(relative)).parts:
+                        report.errors.append("Unsafe path in source_inventory.json")
+        except (OSError, json.JSONDecodeError):
+            report.errors.append("Malformed JSON: source_inventory.json")
+    pack_manifest_path = root / "meta" / "pack_manifest.json"
+    if pack_manifest_path.is_file():
+        try:
+            pack_manifest = json.loads(pack_manifest_path.read_text(encoding="utf-8"))
+            if isinstance(pack_manifest, dict):
+                inventory = pack_manifest.get("source_inventory")
+                if isinstance(inventory, dict):
+                    for relative in inventory.get("unsupported_relative_paths", []):
+                        if _is_absolute_metadata_path(relative) or ".." in Path(str(relative)).parts:
+                            report.errors.append("Unsafe path in pack manifest source_inventory")
+                recorded_metrics = pack_manifest.get("source_metrics")
+                if isinstance(recorded_metrics, dict):
+                    for key in (
+                        "ready_source_count",
+                        "chunk_count",
+                        "retained_lecturer_source_count",
+                        "source_error_count",
+                        "unsupported_source_count",
+                        "meaningful_lecturer_source_count",
+                        "viable",
+                    ):
+                        if recorded_metrics.get(key) != report.metrics.get(key):
+                            report.errors.append(f"Inconsistent pack manifest source metric: {key}")
+        except (OSError, json.JSONDecodeError):
+            report.errors.append("Malformed JSON: pack_manifest.json")
     exam_path = root / "meta" / "exam_manifest.json"
     if exam_path.is_file():
         try:
@@ -673,6 +833,8 @@ def run_ai_study_pack_validator(root: Path) -> int:
     for error in report.errors:
         print(f"ERROR: {error}")
     print(f"Warnings: {len(report.warnings)}")
+    if report.metrics:
+        print("Source metrics: " + json.dumps(report.metrics, ensure_ascii=False, sort_keys=True))
     for warning in report.warnings:
         print(f"WARNING: {warning}")
     return 0 if report.valid else 1
