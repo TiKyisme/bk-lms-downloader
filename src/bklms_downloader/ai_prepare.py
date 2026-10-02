@@ -180,7 +180,10 @@ def _ai_runtime_self_test() -> Path:
         )
         diagnostic_text = json.dumps(diagnostic, ensure_ascii=False)
         if not diagnostic.get("meaningful_lecturer_source_count"):
-            raise RuntimeError("AI course diagnostic self-test found no teaching evidence")
+            raise RuntimeError(
+                "AI course diagnostic self-test found no teaching evidence: "
+                + json.dumps(diagnostic, ensure_ascii=False, sort_keys=True)
+            )
         if str(base) in diagnostic_text or any(marker in diagnostic_text for marker in expected_markers.values()):
             raise RuntimeError("AI course diagnostic self-test leaked a path or source content")
 

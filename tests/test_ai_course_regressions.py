@@ -362,8 +362,8 @@ def test_packaged_diagnostic_cli_outputs_only_relative_safe_metrics(tmp_path: Pa
         timeout=60,
     )
 
-    assert completed.returncode == 0
     report = json.loads(completed.stdout)
+    assert completed.returncode == 0, report
     assert report["resolved_root_status"] == "resolved_legacy_explicit_folder"
     assert report["source_inventory"]["extension_counts"][".docx"] == 1
     assert report["ready_source_count"] > 0
@@ -394,8 +394,8 @@ def test_packaged_diagnostic_refuses_shared_parent_with_multiple_course_metadata
         timeout=60,
     )
 
-    assert completed.returncode == 1
     report = json.loads(completed.stdout)
+    assert completed.returncode == 1, report
     assert report["resolved_root_status"] == "ambiguous_multiple_courses"
     assert "failure_reason" in report
     assert str(shared) not in completed.stdout
@@ -422,9 +422,9 @@ def test_diagnostic_cli_writes_safe_report_for_windowed_invocation(tmp_path: Pat
         timeout=60,
     )
 
-    assert completed.returncode == 0
-    assert completed.stdout == ""
     report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert completed.returncode == 0, report
+    assert completed.stdout == ""
     assert report["meaningful_lecturer_source_count"] > 0
     rendered = json.dumps(report)
     assert str(course_root) not in rendered

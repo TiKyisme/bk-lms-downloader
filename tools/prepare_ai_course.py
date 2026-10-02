@@ -1950,7 +1950,7 @@ def diagnose_course_directory(input_path: Path) -> dict:
         return report
 
     with tempfile.TemporaryDirectory(prefix="bklms_ai_diagnostic_") as temporary:
-        workspace = Path(temporary) / "pack"
+        workspace = (Path(temporary) / "pack").resolve()
         args = SimpleNamespace(
             input=source_root,
             output=Path(temporary),
