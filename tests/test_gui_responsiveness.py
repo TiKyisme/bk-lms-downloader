@@ -1,5 +1,8 @@
 import queue
+from types import SimpleNamespace
 
+import bklms_downloader.gui as gui
+from bklms_downloader.course_store import CourseStore
 from bklms_downloader.gui import (
     LIVE_LOG_MAX_LINES,
     LIVE_LOG_TRIM_TO_LINES,
@@ -58,6 +61,138 @@ def test_checkbox_toggle_updates_one_row_without_rebuilding_course_list():
     assert course.selected is False
     assert row.updated == [course]
     assert app.current_course_id == course.id
+
+
+def test_main_course_rows_start_unchecked_and_rebuild_keeps_session_selection(
+    monkeypatch,
+    tmp_path,
+):
+    class FakeWidget:
+        def __init__(self, *_args, variable=None, **_kwargs):
+            self.variable = variable
+
+        def grid(self, *_args, **_kwargs):
+            pass
+
+        def bind(self, *_args, **_kwargs):
+            pass
+
+        def configure(self, **_kwargs):
+            pass
+
+    frame = gui.CourseRow.__mro__[1]
+    for method in (
+        "__init__",
+        "grid_columnconfigure",
+        "grid_propagate",
+        "grid",
+        "bind",
+        "configure",
+        "destroy",
+    ):
+        monkeypatch.setattr(frame, method, lambda *args, **kwargs: None)
+    monkeypatch.setattr(gui.tk, "BooleanVar", FakeVar)
+    monkeypatch.setattr(gui.ctk, "CTkCheckBox", FakeWidget)
+    monkeypatch.setattr(gui.ctk, "CTkLabel", FakeWidget)
+
+    store = CourseStore(tmp_path / "courses.json")
+    first = store.add("https://lms.hcmut.edu.vn/course/view.php?id=101", tmp_path / "one")
+    second = store.add("https://lms.hcmut.edu.vn/course/view.php?id=102", tmp_path / "two")
+    app = App.__new__(App)
+    app.syncing = False
+    app.store = store
+    app.course_rows = {}
+    app.course_scroll = object()
+    app.current_course_id = None
+    app.course_detail_var = FakeVar("")
+    app._show_course_detail = lambda _course_id: None
+
+    App._refresh_courses(app)
+
+    assert {course_id: row.check_var.get() for course_id, row in app.course_rows.items()} == {
+        first.id: False,
+        second.id: False,
+    }
+
+    first_row = app.course_rows[first.id]
+    first_row.check_var.set(True)
+    first_row._toggle()
+    assert store.get(first.id).selected is True
+
+    App._refresh_courses(app)
+
+    assert app.course_rows[first.id].check_var.get() is True
+    assert app.course_rows[second.id].check_var.get() is False
+
+
+def test_sync_all_and_ai_all_include_courses_even_when_all_checkboxes_are_unchecked(monkeypatch):
+    courses = [
+        Course("1", "https://lms.hcmut.edu.vn/course/view.php?id=1", "one"),
+        Course("2", "https://lms.hcmut.edu.vn/course/view.php?id=2", "two"),
+    ]
+    assert all(course.selected is False for course in courses)
+
+    app = App.__new__(App)
+    app.login_opening = False
+    app.syncing = False
+    app.driver = object()
+    app.store = SimpleNamespace(list=lambda: courses)
+    app.sync_elapsed_var = FakeVar("")
+    app.overall_var = FakeVar("")
+    app.current_course_var = FakeVar("")
+    app._set_busy = lambda _busy: None
+    app._reset_progress_state = lambda: None
+    app._set_summary_message = lambda _message: None
+    app._set_login_status = lambda *_args: None
+    app._log = lambda _message: None
+
+    started = []
+
+    class FakeThread:
+        def __init__(self, *, target, daemon):
+            started.append((target, daemon))
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(gui.threading, "Thread", FakeThread)
+    App._start_sync(app, selected_only=False)
+
+    assert app.progress_total == 2
+    assert len(started) == 1
+    assert started[0][1] is True
+
+    ai_app = App.__new__(App)
+    ai_app.syncing = False
+    ai_app.store = SimpleNamespace(list=lambda: courses)
+    confirmed = []
+    ai_app._confirm_ai_batch = confirmed.append
+    App._prepare_all_courses_for_ai(ai_app)
+
+    assert confirmed == [courses]
+
+
+def test_delete_all_ignores_unchecked_state(monkeypatch):
+    courses = [
+        Course("1", "https://lms.hcmut.edu.vn/course/view.php?id=1", "one"),
+        Course("2", "https://lms.hcmut.edu.vn/course/view.php?id=2", "two"),
+    ]
+    confirmations = []
+
+    class FakeConfirmation:
+        def __init__(self, _parent, **kwargs):
+            confirmations.append(kwargs)
+
+    monkeypatch.setattr(gui, "DeleteConfirmationDialog", FakeConfirmation)
+    app = App.__new__(App)
+    app.syncing = False
+    app.store = SimpleNamespace(list=lambda: courses)
+    app._clear_courses_from_app = lambda: None
+
+    App._delete_all_courses(app)
+
+    assert len(confirmations) == 1
+    assert "2 course" in confirmations[0]["message"]
 
 
 def test_event_drain_uses_a_bounded_per_tick_budget():
