@@ -19,8 +19,12 @@ installed normally.
 
 Current release jobs use native GitHub-hosted runners:
 
-- Apple Silicon: `macos-14` (arm64)
+- Apple Silicon (M1 or newer, including M5): `macos-14` (arm64)
 - Intel: `macos-15-intel` (x64)
+
+M5 Macs use the same `BK-LMS-Downloader-macOS-arm64.dmg`; there is no
+chip-generation-specific artifact or build. This describes the arm64 target,
+not a physical M5 hardware test.
 
 ## Signing and notarization
 
