@@ -48,15 +48,26 @@ def test_study_pack_freshness_is_visible_without_hiding_sync_errors():
 
 
 def test_checked_courses_is_shared_source_of_truth_for_batch_actions():
-    checked = Course("1", "https://lms.hcmut.edu.vn/course/view.php?id=1", "out")
+    checked = Course(
+        "1",
+        "https://lms.hcmut.edu.vn/course/view.php?id=1",
+        "out",
+        selected=True,
+    )
     unchecked = Course(
         "2",
         "https://lms.hcmut.edu.vn/course/view.php?id=2",
         "out",
         selected=False,
     )
+    checked_too = Course(
+        "3",
+        "https://lms.hcmut.edu.vn/course/view.php?id=3",
+        "out",
+        selected=True,
+    )
 
-    assert checked_courses([checked, unchecked]) == [checked]
+    assert checked_courses([checked, unchecked, checked_too]) == [checked, checked_too]
     assert checked_courses([unchecked]) == []
 
 

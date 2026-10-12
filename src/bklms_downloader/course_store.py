@@ -100,7 +100,7 @@ class CourseStore:
         *,
         name: str = "",
         code: str = "",
-        selected: bool = True,
+        selected: bool = False,
     ) -> Course:
         normalized_url = self._validate_url(url)
         self._ensure_unique_url(normalized_url)
@@ -148,7 +148,7 @@ class CourseStore:
                     output=str(Path(output_raw).expanduser()),
                     name=name.strip(),
                     code=(code.strip().upper() or extract_course_code(name) or ""),
-                    selected=True,
+                    selected=False,
                 )
             )
         if not prepared:

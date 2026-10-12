@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from bklms_downloader.course_store import CourseStore
-from bklms_downloader.models import CourseSyncResult
+from bklms_downloader.models import Course, CourseSyncResult
 
 
 def course_url(course_id: int) -> str:
@@ -22,11 +22,68 @@ def test_empty_store_then_add_save_and_load_vietnamese_course(tmp_path: Path):
         name="Mạng máy tính (TN) (CO3094)_NGUYỄN",
     )
 
+    assert course.selected is False
     assert course.code == "CO3094"
     loaded = CourseStore(path).list()
     assert len(loaded) == 1
+    assert loaded[0].selected is False
     assert loaded[0].name == "Mạng máy tính (TN) (CO3094)_NGUYỄN"
     assert loaded[0].output == str(tmp_path / "Mạng máy tính")
+
+
+def test_fresh_course_defaults_to_unchecked():
+    course = Course("fresh", course_url(3094), "out")
+
+    assert course.selected is False
+
+
+def test_legacy_selection_values_are_ignored_without_rewriting_saved_metadata(tmp_path: Path):
+    path = tmp_path / "courses.json"
+    payload = {
+        "schema_version": 1,
+        "courses": [
+            {
+                "id": "legacy-checked",
+                "url": course_url(3091),
+                "output": str(tmp_path / "one"),
+                "name": "Saved one",
+                "selected": True,
+                "last_status": "success",
+            },
+            {
+                "id": "legacy-no-selection-field",
+                "url": course_url(3092),
+                "output": str(tmp_path / "two"),
+                "name": "Saved two",
+            },
+        ],
+    }
+    original_json = json.dumps(payload, ensure_ascii=False)
+    path.write_text(original_json, encoding="utf-8")
+
+    loaded = CourseStore(path).list()
+
+    assert [course.selected for course in loaded] == [False, False]
+    assert loaded[0].last_status == "success"
+    assert loaded[0].name == "Saved one"
+    assert loaded[1].name == "Saved two"
+    assert path.read_text(encoding="utf-8") == original_json
+
+
+def test_checked_state_is_kept_in_session_but_reset_when_store_restarts(tmp_path: Path):
+    path = tmp_path / "courses.json"
+    store = CourseStore(path)
+    course = store.add(course_url(3093), tmp_path / "course", name="Course")
+
+    checked = store.edit(course.id, selected=True)
+    store.save()
+
+    assert checked.selected is True
+    assert store.get(course.id).selected is True
+    assert json.loads(path.read_text(encoding="utf-8"))["courses"][0]["selected"] is True
+
+    restarted = CourseStore(path)
+    assert [item.selected for item in restarted.list()] == [False]
 
 
 def test_duplicate_normalized_url_is_rejected(tmp_path: Path):
@@ -120,6 +177,7 @@ def test_add_many_skips_duplicates_writes_once_and_rolls_back_on_failure(tmp_pat
         ]
     )
     assert len(added) == 1
+    assert added[0].selected is False
     assert save_calls == 1
     assert store.get(existing.id).output == str(tmp_path / "existing")
 

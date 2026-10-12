@@ -29,7 +29,7 @@ class Course:
     output: str
     name: str = ""
     code: str = ""
-    selected: bool = True
+    selected: bool = False
     last_sync: Optional[str] = None
     last_status: str = "never"
     last_downloaded: int = 0
@@ -56,7 +56,9 @@ class Course:
             output=str(value.get("output", "")).strip(),
             name=str(value.get("name", "")).strip(),
             code=str(value.get("code", "")).strip().upper(),
-            selected=bool(value.get("selected", True)),
+            # Selection is session-scoped UI state. Ignore persisted values
+            # from older versions so legacy courses always load unchecked.
+            selected=False,
             last_sync=(
                 str(value["last_sync"]).strip()
                 if value.get("last_sync")

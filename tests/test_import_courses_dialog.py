@@ -151,6 +151,7 @@ def test_confirmed_import_batches_one_write_preserves_existing_output_and_persis
     )
 
     assert len(added) == 1
+    assert added[0].selected is False
     assert saves == 1
     assert store.get(existing.id).output == str(old_output)
     assert added[0].output == str(chosen)
