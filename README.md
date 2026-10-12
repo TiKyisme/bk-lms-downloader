@@ -22,7 +22,7 @@ Bạn cũng có thể tải các gói đóng gói từ
 [GitHub Releases](https://github.com/TiKyisme/bk-lms-downloader/releases/latest).
 
 - **Windows:** `BK-LMS-Downloader-Windows.exe`
-- **Apple Silicon Mac (M1/M2/M3/M4):** `BK-LMS-Downloader-macOS-arm64.dmg`
+- **Apple Silicon Mac (M1/M2/M3/M4/M5 và mới hơn):** `BK-LMS-Downloader-macOS-arm64.dmg`
 - **Intel Mac:** `BK-LMS-Downloader-macOS-x64.dmg`
 
 On a Mac, open **Apple menu → About This Mac**: it shows either an Apple chip
