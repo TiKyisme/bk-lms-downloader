@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.5.2 - Release candidate
+
+### Fixed
+
+- Treat recoverable individual resource failures as partial sync results instead
+  of fatal course failures, while keeping final completion truthful.
+- Reject empty or unusable AI Study Packs, resolve course roots safely, and
+  rebuild semantically empty legacy packs.
+- Support DOCX, XLSX, XLSM, and CSV lecturer sources in AI Study Packs.
+- Keep Coursewave no-match optional so usable local LMS material can still
+  produce a Study Pack.
+- Start with course checkboxes unchecked and keep selected-only actions limited
+  to explicitly checked courses.
+- Stop declaring the historical version-bound Windows desktop shortcut while
+  retaining package Start/AUMID launch registration.
+- Clarify that the Apple Silicon arm64 build targets M1 through M5 and newer.
+
 ## 1.5.1 - 2026-09-26
 
 ### Fixed
