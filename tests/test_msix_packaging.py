@@ -179,28 +179,28 @@ def test_reject_any_unreviewed_manifest_extension():
 
 
 def test_local_test_build_uses_next_patch_without_reusing_public_version():
-    assert resolve_package_version("1.5.2.0") == ("1.5.2.0", "local-test-only")
+    assert resolve_package_version("1.5.3.0") == ("1.5.3.0", "local-test-only")
     with pytest.raises(ValueError):
         resolve_package_version("1.5.1.0")
     with pytest.raises(ValueError):
-        resolve_package_version("1.5.3.0")
+        resolve_package_version("1.5.2.0")
     with pytest.raises(ValueError, match="without a version bump"):
-        resolve_package_version(latest_tag="v1.5.1", head_commit="main", tag_commit="release")
+        resolve_package_version(latest_tag="v1.5.2", head_commit="main", tag_commit="release")
     assert resolve_package_version(
         latest_tag="v1.5.1", head_commit="release", tag_commit="release"
-    ) == ("1.5.1.0", "store-release")
+    ) == ("1.5.2.0", "store-release")
 
 
 def test_local_test_build_stages_temporary_app_version_without_touching_source(tmp_path: Path):
-    test_root = prepare_local_test_build_root(tmp_path / "candidate-source", "1.5.2")
+    test_root = prepare_local_test_build_root(tmp_path / "candidate-source", "1.5.3")
 
     staged_version = (test_root / "src/bklms_downloader/__init__.py").read_text(encoding="utf-8")
     staged_project = (test_root / "pyproject.toml").read_text(encoding="utf-8")
     canonical_init = (Path(__file__).resolve().parents[1] / "src/bklms_downloader/__init__.py").read_text(encoding="utf-8")
 
-    assert '__version__ = "1.5.2"' in staged_version
-    assert 'version = "1.5.2"' in staged_project
-    assert '__version__ = "1.5.1"' in canonical_init
+    assert '__version__ = "1.5.3"' in staged_version
+    assert 'version = "1.5.3"' in staged_project
+    assert '__version__ = "1.5.2"' in canonical_init
 
 
 def synthetic_pe() -> bytes:

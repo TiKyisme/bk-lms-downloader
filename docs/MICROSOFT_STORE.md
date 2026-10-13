@@ -16,8 +16,8 @@ Do not build or submit MSIX `1.5.1.0` from current main: application-code
 changes have landed after the public v1.5.1 release. Microsoft Store may still
 display the previously approved version.
 
-Next combined release target, after the Store-launch fix is validated and
-release preparation bumps the application source version:
+Next combined release candidate target (not yet publicly tagged, released, or
+submitted to Microsoft Store):
 
 ```text
 Application / Git tag: 1.5.2 / v1.5.2
@@ -25,8 +25,8 @@ Microsoft Store MSIX:  1.5.2.0
 ```
 
 The fourth MSIX version component must remain `0`. Do not reuse the packaging-
-only `1.1.1.0` version or create versions such as `1.5.2.1`. During future
-release preparation, after the source version is `1.5.2`, run:
+only `1.1.1.0` version or create versions such as `1.5.2.1`. For this release
+candidate, with source version `1.5.2`, run:
 
 ```powershell
 python tools/validate_versions.py --tag v1.5.2 --msix-version 1.5.2.0
@@ -37,11 +37,12 @@ MSIX version disagree, or if the fourth MSIX component is non-zero.
 
 ## Reproducible x64 MSIX packaging
 
-Use the build virtual environment after installing `.[dev]`. Run on Windows for
-a local, test-only candidate while source version is still `1.5.1`:
+Use the build virtual environment after installing `.[dev]`. For the v1.5.2
+release candidate, build in normal Store-release mode from the bumped
+`release/v1.5.2` source branch (omit `--local-test-version`):
 
 ```powershell
-.venv-build/Scripts/python.exe tools/build_msix.py --identity-package <trusted-previous.msix> --makeappx <path-to-makeappx.exe> --output <empty-temp-directory> --local-test-version 1.5.2.0
+.venv-build/Scripts/python.exe tools/build_msix.py --identity-package <trusted-previous.msix> --makeappx <path-to-makeappx.exe> --output <empty-temp-directory>
 ```
 
 The builder reads a seed's identity and branding assets, then generates a new
@@ -53,13 +54,14 @@ artifact, but its provenance must be independently known; an unverified local
 build is not evidence of a prior submission. Never substitute guessed identity
 values. Keep the seed local.
 
-The local-test option accepts only the next patch candidate, does not change the
-canonical source version, and never builds the already-public version. For a
-Store release, first bump source version and create the matching release tag;
-then omit `--local-test-version`. The builder rebuilds the Windows EXE, runs all
-four packaged self-tests, and packs/unpacks with MakeAppx. It checks the payload
-allowlist, manifest launch policy, asset references, x64 GUI executable and
-fresh EXE hash. Existing output packages are not replaced.
+The local-test option is only for testing the next patch before the canonical
+source version is bumped; it does not change source files or rebuild the
+already-public version. The v1.5.2 public tag must wait until the release
+candidate passes manual testing and the release-prep change is merged. The
+builder rebuilds the Windows EXE, runs all four packaged self-tests, and
+packs/unpacks with MakeAppx. It checks the payload allowlist, manifest launch
+policy, asset references, x64 GUI executable and fresh EXE hash. Existing
+output packages are not replaced.
 
 The output is unsigned. For local install/update testing, sign only a disposable
 copy with a test certificate matching the package Publisher, trust it locally,
